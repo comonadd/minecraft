@@ -15,7 +15,7 @@ endif ()
 # set(CMAKE_CXX_COMPILER g++)
 set(sources
   ${platform_sources}
-  ${src}/main.cpp ${src}/util.cpp)
+  ${src}/main.cpp ${src}/util.cpp ${src}/shaders.cpp)
 
 set(CMAKE_CXX_STANDARD 20)
 add_compile_options(-Wall)
