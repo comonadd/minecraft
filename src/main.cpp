@@ -6,7 +6,6 @@
 #include <iostream>
 #include <streambuf>
 #include <thread>
-#include <windows.h>
 
 std::string read_whole_file(char const *fp) {
   std::ifstream vs_f(fp);
@@ -90,7 +89,7 @@ int main() {
   glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
   auto basic_shader =
-      load_shader("../shaders/basic_vs.glsl", "../shaders/basic_fs.glsl");
+      load_shader("./shaders/basic_vs.glsl", "./shaders/basic_fs.glsl");
   glUseProgram(basic_shader);
 
   GLuint vao;

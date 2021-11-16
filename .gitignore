@@ -1,2 +1,4 @@
 build/
 glew/
+Debug/
+compile_commands.json
