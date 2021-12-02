@@ -1,9 +1,16 @@
-#version 150 core
+#version 330 core
 
-out vec4 outColor;
+// Interpolated values from the vertex shaders
+in vec2 UV;
 in vec3 fragmentColor;
 
-void main()
-{
-    outColor = vec4(fragmentColor, 1.0);
+// Ouput data
+out vec4 color;
+
+// Values that stay constant for the whole mesh.
+uniform sampler2D myTextureSampler;
+
+void main(){
+    // Output color = color of the texture at the specified UV
+    color = texture(myTextureSampler, UV) * vec4(fragmentColor, 1.0);
 }

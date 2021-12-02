@@ -27,6 +27,8 @@ elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
   add_compile_options(-O3)
 endif ()
 
+include_directories(./third-party)
+
 add_executable(${TARGET} ${sources})
 
 find_package(Threads)
