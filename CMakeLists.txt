@@ -12,10 +12,9 @@ elseif (UNIX)
   set(platform_sources ${src}/platform/linux.cpp)
 endif ()
 
-# set(CMAKE_CXX_COMPILER g++)
 set(sources
   ${platform_sources}
-  ${src}/main.cpp ${src}/util.cpp ${src}/shaders.cpp)
+  ${src}/main.cpp ${src}/util.cpp ${src}/shaders.cpp ${src}/world.cpp third-party/SimplexNoise/src/SimplexNoise.cpp)
 
 set(CMAKE_CXX_STANDARD 20)
 add_compile_options(-Wall)
