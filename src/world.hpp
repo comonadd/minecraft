@@ -64,6 +64,22 @@ inline ChunkId chunk_id_from_coords(int x, int y) {
   return ((x + y) * (x + y + 1) / 2) + y;
 }
 
+enum BiomeKind {
+  Grassland = 0,
+  Mountains = 1,
+  Desert = 2,
+  Ocean = 3,
+  Forest = 4
+};
+
+struct Biome {
+  BiomeKind kind;
+  int maxHeight;
+  SimplexNoise noise;
+};
+
+const int WATER_LEVEL = 30;
+
 struct World {
   int seed = 3849534;
   std::vector<shared_ptr<Chunk>> chunks{(size_t)(4 * (radius * radius))};
@@ -72,6 +88,39 @@ struct World {
   Attrib block_attrib;
   siv::PerlinNoise perlin;
   SimplexNoise simplex{0.1f, 1.0f, 2.0f, 0.5f};
+  SimplexNoise biome_noise{0.01f, 1.0f, 2.0f, 0.5f};
+
+  std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
+      // Desert
+      {BiomeKind::Desert,
+       Biome{.kind = BiomeKind::Desert,
+             .maxHeight = CHUNK_HEIGHT,
+             .noise = SimplexNoise{0.01f, 1.0f, 2.0f, 0.5f}}},
+
+      // Forest
+      {BiomeKind::Forest,
+       Biome{.kind = BiomeKind::Forest,
+             .maxHeight = CHUNK_HEIGHT,
+             .noise = SimplexNoise{0.03f, 1.0f, 2.0f, 0.5f}}},
+
+      // Grassland
+      {BiomeKind::Grassland,
+       Biome{.kind = BiomeKind::Grassland,
+             .maxHeight = CHUNK_HEIGHT,
+             .noise = SimplexNoise{0.025f, 1.0f, 2.0f, 0.5f}}},
+
+      // Oceans
+      {BiomeKind::Ocean,
+       Biome{.kind = BiomeKind::Ocean,
+             .maxHeight = WATER_LEVEL,
+             .noise = SimplexNoise{0.001f, 1.0f, 2.0f, 0.5f}}},
+
+      // Mountains
+      {BiomeKind::Mountains,
+       Biome{.kind = BiomeKind::Mountains,
+             .maxHeight = CHUNK_HEIGHT,
+             .noise = SimplexNoise{0.35f, 1.0f, 2.0f, 0.5f}}},
+  };
 };
 
 void load_chunks_around_player(World& world, WorldPos center_pos);

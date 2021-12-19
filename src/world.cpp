@@ -28,8 +28,22 @@ inline shared_ptr<Chunk> is_chunk_loaded(World &world, int x, int y) {
   return loaded ? ch->second : nullptr;
 }
 
-inline BlockType block_type_for_height(int height) {
-  // fmt::print("height: {}\n", height);
+inline BlockType block_type_for_height(Biome &bk, int height) {
+  switch (bk.kind) {
+    case BiomeKind::Desert:
+      return BlockType::Sand;
+    case BiomeKind::Grassland:
+      return BlockType::Grass;
+    case BiomeKind::Mountains:
+      return BlockType::Stone;
+    case BiomeKind::Ocean:
+      return BlockType::Water;
+    case BiomeKind::Forest:
+      return BlockType::Dirt;
+    default:
+      return BlockType::Snow;
+  }
+
   int top = CHUNK_HEIGHT - BLOCKS_OF_AIR_ABOVE;
   if (height > (top - 6)) {
     return BlockType::Grass;
@@ -109,13 +123,10 @@ void make_cube_faces(ChunkMesh &mesh, int left, int right, int top, int bottom,
   float a = 0 + 1 / 2048.0;
   float b = s - 1 / 2048.0;
   int faces[6] = {left, right, top, bottom, front, back};
-  int tiles[6] = {wleft, wright, wtop, wbottom, wfront, wback};
   for (int i = 0; i < 6; i++) {
     if (faces[i] == 0) {
       continue;
     }
-    float du = (tiles[i] % TEXTURE_TILE_WIDTH) * s;
-    float dv = (tiles[i] / TEXTURE_TILE_HEIGHT) * s;
     // int flip = ao[i][0] + ao[i][3] > ao[i][1] + ao[i][2];
     int flip = 1;
     for (int v = 0; v < 6; v++) {
@@ -175,6 +186,37 @@ inline bool IS_TB_LEFT_OF(Chunk &chunk, int x, int y, int z) {
   if (nearx == 0) return true;
   return IS_TB_AT(chunk, nearx, y, z);
 }
+inline BiomeKind biome_kind_at_point(World &world, int x, int y) {
+  // goes from -1.0 to 1.0
+  auto noise = world.biome_noise.fractal(16, x, y);
+  fmt::print("Biome Noise at {}, {} = {}\n", x, y, noise);
+  if (noise > 0.6) {
+    return BiomeKind::Mountains;
+  } else if (noise > 0.2) {
+    return BiomeKind::Forest;
+  } else if (noise > 0.0) {
+    return BiomeKind::Grassland;
+  } else if (noise > -0.4) {
+    return BiomeKind::Desert;
+  } else {
+    return BiomeKind::Ocean;
+  }
+}
+
+inline Biome &biome_at_point(World &world, int x, int y) {
+  auto bk = biome_kind_at_point(world, x, y);
+  return world.biomes_by_kind[bk];
+}
+
+inline float noise_for_biome_at_point(World &world, Biome &biome, int x,
+                                      int y) {
+  double frequency = 1.0;
+  const double fx = NOISE_PICTURE_WIDTH / frequency;
+  const double fy = NOISE_PICTURE_WIDTH / frequency;
+  auto ng = biome.noise;
+  auto noise = ng.fractal(8, (float)x / fx, (float)y / fy);
+  return noise;
+}
 
 void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
                    Attrib block_attrib) {
@@ -184,25 +226,41 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
   chunk.x = chunk_x;
   chunk.y = chunk_y;
 
-  double frequency = 1.0;
-  const double fx = NOISE_PICTURE_WIDTH / frequency;
-  const double fy = NOISE_PICTURE_WIDTH / frequency;
-
   // Determine the height map
   for (int x = 0; x < CHUNK_WIDTH; ++x) {
     int global_x = chunk.x + x;
     for (int y = 0; y < CHUNK_LENGTH; ++y) {
       int global_y = chunk.y + y;
-      auto noise =
-          world.simplex.fractal(8, (float)global_x / fx, (float)global_y / fy);
-      int maxHeight = CHUNK_HEIGHT;
-      int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
-      for (int height = columnHeight; height >= 0; --height) {
-        Block block;
-        block.type = block_type_for_height(height);
-        CHUNK_AT(chunk, x, y, height) = block;
+      auto bk = biome_at_point(world, global_x, global_y);
+      switch (bk.kind) {
+        case BiomeKind::Ocean: {
+          auto noise = noise_for_biome_at_point(world, bk, global_x, global_y);
+          int maxHeight = bk.maxHeight;
+          int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
+          for (int height = columnHeight; height >= 0; --height) {
+            Block block;
+            block.type = block_type_for_height(bk, height);
+            CHUNK_AT(chunk, x, y, height) = block;
+          }
+          // fill everything up to the water level with water
+          for (int height = columnHeight; columnHeight < WATER_LEVEL;
+               ++columnHeight) {
+            CHUNK_AT(chunk, x, y, height).type = BlockType::Water;
+          }
+          CHUNK_AT(chunk, x, y, WATER_LEVEL + 1).type = BlockType::Air;
+        } break;
+        default: {
+          auto noise = noise_for_biome_at_point(world, bk, global_x, global_y);
+          int maxHeight = CHUNK_HEIGHT;
+          int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
+          for (int height = columnHeight; height >= 0; --height) {
+            Block block;
+            block.type = block_type_for_height(bk, height);
+            CHUNK_AT(chunk, x, y, height) = block;
+          }
+          CHUNK_AT(chunk, x, y, columnHeight + 1).type = BlockType::Air;
+        } break;
       }
-      CHUNK_AT(chunk, x, y, columnHeight + 1).type = BlockType::Air;
     }
   }
 
@@ -249,7 +307,6 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
 
   // Only allocate a new buffer if none was allocated before
   if (chunk.buffer == 0) {
-    fmt::print("Generating new buffer {}\n", chunk.buffer);
     glGenBuffers(1, &chunk.buffer);
   }
 
@@ -265,6 +322,7 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
   if (chunk.VAO == 0) {
     glGenVertexArrays(1, &chunk.VAO);
   }
+
   glBindVertexArray(chunk.VAO);
 
   glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);

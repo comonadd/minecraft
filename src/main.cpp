@@ -229,7 +229,7 @@ void render() {
                           (void *)offsetof(VertexData, uv));
 
     // render the chunk mesh
-    fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
+    // fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
     glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
 
     glDisableVertexAttribArray(block_attrib.position);
@@ -254,7 +254,6 @@ void update() {
 void setup_noise() {
   const siv::PerlinNoise perlin(state.world.seed);
   state.world.perlin = perlin;
-  // state.world.simplex = SimplexNoise(1.0f, 0.4f, 2.0f, 0.5f);
 }
 
 void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
