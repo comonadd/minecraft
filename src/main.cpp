@@ -59,8 +59,9 @@ struct {
   World world;
 
   // TODO: Update on resize
+  // TODO: Also need to change the clipping distance based on the chunk radius
   glm::mat4 Projection = glm::perspective(
-      glm::radians(45.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 100.0f);
+      glm::radians(45.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 800.0f);
 } state;
 
 struct Texture {
@@ -228,7 +229,7 @@ void render() {
                           (void *)offsetof(VertexData, uv));
 
     // render the chunk mesh
-    // fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
+    fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
     glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
 
     glDisableVertexAttribArray(block_attrib.position);
@@ -259,6 +260,8 @@ void setup_noise() {
 void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
                                 GLenum severity, GLsizei length,
                                 const GLchar *message, const void *userParam) {
+  // buffer memory stuff warning
+  if (type == 0x8251) return;
   fprintf(stderr,
           "GL CALLBACK: %s type = 0x%x, severity = 0x%x, message = %s\n",
           (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : ""), type, severity,

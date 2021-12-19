@@ -7,6 +7,9 @@
 
 #include "PerlinNoise/PerlinNoise.hpp"
 
+using std::max;
+using std::min;
+
 float BLOCK_WIDTH = 2.0f;
 float BLOCK_LENGTH = BLOCK_WIDTH;
 float BLOCK_HEIGHT = BLOCK_WIDTH;
@@ -73,6 +76,11 @@ glm::vec2 block_type_texture_offset(BlockType bt) {
   return res;
 }
 
+glm::vec2 block_type_texture_offset_for_face(int face) {
+  int debugFaceTexturesOffset = 80;
+  return block_type_texture_offset((BlockType)(face + debugFaceTexturesOffset));
+}
+
 void make_cube_faces(ChunkMesh &mesh, int left, int right, int top, int bottom,
                      int front, int back, int wleft, int wright, int wtop,
                      int wbottom, int wfront, int wback, float x, float y,
@@ -134,6 +142,40 @@ void make_cube_faces(ChunkMesh &mesh, int left, int right, int top, int bottom,
 
 double NOISE_PICTURE_WIDTH = CHUNK_WIDTH * 2;
 
+#define CHUNK_AT(__chunk, __x, __y, __z) (__chunk).blocks[(__x)][(__y)][(__z)]
+#define CHUNK_COL_AT(__chunk, __x, __y) CHUNK_AT(__chunk, __x, __y, 0)
+#define IS_TB(__block) (__block).type == BlockType::Air
+
+#define IS_TB_AT(__chunk, __x, __y, __z) IS_TB(CHUNK_AT(__chunk, __x, __y, __z))
+
+auto W = CHUNK_WIDTH;
+auto H = CHUNK_HEIGHT;
+auto L = CHUNK_LENGTH;
+
+inline bool IS_TB_BACK_OF(Chunk &chunk, int x, int y, int z) {
+  const auto neary = min(L - 1, y + 1);
+  if (neary == L - 1) return true;
+  return IS_TB_AT(chunk, x, neary, z);
+}
+
+inline bool IS_TB_FRONT_OF(Chunk &chunk, int x, int y, int z) {
+  const auto neary = max(0, y - 1);
+  if (neary == 0) return true;
+  return IS_TB_AT(chunk, x, neary, z);
+}
+
+inline bool IS_TB_RIGHT_OF(Chunk &chunk, int x, int y, int z) {
+  const auto nearx = min(L - 1, x + 1);
+  if (nearx == L - 1) return true;
+  return IS_TB_AT(chunk, nearx, y, z);
+}
+
+inline bool IS_TB_LEFT_OF(Chunk &chunk, int x, int y, int z) {
+  const auto nearx = max(0, x - 1);
+  if (nearx == 0) return true;
+  return IS_TB_AT(chunk, nearx, y, z);
+}
+
 void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
                    Attrib block_attrib) {
   chunk.mesh = {};
@@ -146,34 +188,49 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
   const double fx = NOISE_PICTURE_WIDTH / frequency;
   const double fy = NOISE_PICTURE_WIDTH / frequency;
 
-  // blocks
-  for (int local_chunk_x = 0; local_chunk_x < CHUNK_WIDTH; ++local_chunk_x) {
-    int global_x = chunk.x + local_chunk_x;
-
-    for (int local_chunk_y = 0; local_chunk_y < CHUNK_LENGTH; ++local_chunk_y) {
-      int global_y = chunk.y + local_chunk_y;
-
+  // Determine the height map
+  for (int x = 0; x < CHUNK_WIDTH; ++x) {
+    int global_x = chunk.x + x;
+    for (int y = 0; y < CHUNK_LENGTH; ++y) {
+      int global_y = chunk.y + y;
       auto noise =
           world.simplex.fractal(8, (float)global_x / fx, (float)global_y / fy);
-
       int maxHeight = CHUNK_HEIGHT;
       int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
-
-      // fmt::print("Noise at x={}, y={}: {}, determinedHeight={}\n", global_x,
-      //            global_y, noise, columnHeight);
-
       for (int height = columnHeight; height >= 0; --height) {
         Block block;
         block.type = block_type_for_height(height);
-        chunk.blocks[local_chunk_y][local_chunk_x][height] = block;
+        CHUNK_AT(chunk, x, y, height) = block;
+      }
+      CHUNK_AT(chunk, x, y, columnHeight + 1).type = BlockType::Air;
+    }
+  }
 
-        // mesh
-        int left = 1;
-        int right = 1;
-        int top = 1;
-        int bottom = 1;
-        int front = 1;
-        int back = 1;
+  // Generate the mesh
+  for (int x = 0; x < CHUNK_WIDTH; ++x) {
+    int global_x = chunk.x + x;
+
+    for (int y = 0; y < CHUNK_LENGTH; ++y) {
+      int global_y = chunk.y + y;
+      Block *bottomBlock = &CHUNK_COL_AT(chunk, x, y);
+      // start from the highest block
+      Block *column = &(bottomBlock[CHUNK_HEIGHT - 1]);
+
+      // skip the air blocks from above
+      while (column->type == BlockType::Air) column--;
+
+      do {
+        Block block = *column;
+        int height = column - bottomBlock;
+
+        // check which faces are exposed to a Transparent Block
+        int left = IS_TB_LEFT_OF(chunk, x, y, height);
+        int right = IS_TB_RIGHT_OF(chunk, x, y, height);
+        int front = IS_TB_FRONT_OF(chunk, x, y, height);
+        int back = IS_TB_BACK_OF(chunk, x, y, height);
+        int top = IS_TB(CHUNK_AT(chunk, x, y, min(H - 1, height + 1)));
+        int bottom = IS_TB(CHUNK_AT(chunk, x, y, max(0, height - 1)));
+
         int wleft = 0;
         int wright = 0;
         int wtop = 0;
@@ -185,11 +242,17 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
                         wleft, wright, wtop, wbottom, wfront, wback,
                         (float)global_x, (float)height, (float)global_y, n,
                         block.type);
-      }
+        column--;
+      } while (column != bottomBlock);
     }
   }
 
-  glGenBuffers(1, &chunk.buffer);
+  // Only allocate a new buffer if none was allocated before
+  if (chunk.buffer == 0) {
+    fmt::print("Generating new buffer {}\n", chunk.buffer);
+    glGenBuffers(1, &chunk.buffer);
+  }
+
   glBindBuffer(GL_ARRAY_BUFFER, chunk.buffer);
 
   // we've regenerated the chunk mesh
@@ -199,7 +262,9 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
   auto mesh_size = sizeof(chunk.mesh[0]) * chunk.mesh.size();
   auto *meshp = &chunk.mesh[0];
 
-  glGenVertexArrays(1, &chunk.VAO);
+  if (chunk.VAO == 0) {
+    glGenVertexArrays(1, &chunk.VAO);
+  }
   glBindVertexArray(chunk.VAO);
 
   glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);

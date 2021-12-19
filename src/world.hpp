@@ -13,7 +13,7 @@
 
 using WorldPos = glm::ivec3;
 
-enum class BlockType { Dirt, Grass, Stone, Water, Sand, Air, Unknown };
+enum class BlockType { Dirt, Grass, Stone, Water, Sand, Snow, Air, Unknown };
 
 struct Block {
   BlockType type = BlockType::Air;
@@ -22,7 +22,7 @@ struct Block {
 const int CHUNK_LENGTH = 16;
 const int CHUNK_WIDTH = CHUNK_LENGTH;
 const int CHUNK_HEIGHT = 64;
-const float radius = 2;
+const float radius = 16;
 const int BLOCKS_OF_AIR_ABOVE = 20;
 
 extern float BLOCK_WIDTH;
@@ -43,6 +43,7 @@ using ChunkMesh = std::vector<VertexData>;
 
 struct Chunk {
   Block blocks[CHUNK_LENGTH][CHUNK_WIDTH][CHUNK_HEIGHT];
+  uint32_t height = 0;
   ChunkMesh mesh;
 
   int x;
@@ -51,9 +52,9 @@ struct Chunk {
   bool is_dirty = false;
 
   // array buffer
-  GLuint buffer;
+  GLuint buffer = 0;
 
-  GLuint VAO;
+  GLuint VAO = 0;
 };
 
 using ChunkId = long;
