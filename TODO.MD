@@ -1,0 +1,1 @@
+- Fix lag after loading chunks for some time
