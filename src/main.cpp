@@ -171,7 +171,7 @@ void init_graphics() {
   // Accept fragment if it closer to the camera than the former one
   glDepthFunc(GL_LESS);
 
-  glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+  // glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
   glfwSetCursorPosCallback(state.window, mouse_callback);
 }
 
@@ -183,6 +183,9 @@ void process_keys() {
   if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS ||
       glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
     quit();
+  } else if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS) {
+    // Generate world map picture
+    world_dump_heights(state.world);
   }
 
   float mov_vel = state.speed * state.delta_time;

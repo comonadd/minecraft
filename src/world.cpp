@@ -6,7 +6,11 @@
 #include <glm/glm.hpp>
 
 #include "PerlinNoise/PerlinNoise.hpp"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb/stb_image.h"
+#include "stb/stb_image_write.h"
 
+using std::array;
 using std::max;
 using std::min;
 
@@ -29,29 +33,52 @@ inline shared_ptr<Chunk> is_chunk_loaded(World &world, int x, int y) {
 }
 
 inline BlockType block_type_for_height(Biome &bk, int height) {
+  int top = bk.maxHeight - BLOCKS_OF_AIR_ABOVE;
+
   switch (bk.kind) {
-    case BiomeKind::Desert:
-      return BlockType::Sand;
-    case BiomeKind::Grassland:
-      return BlockType::Grass;
-    case BiomeKind::Mountains:
-      return BlockType::Stone;
-    case BiomeKind::Ocean:
+    case BiomeKind::Desert: {
+      if (height > (top - 6)) {
+        return BlockType::Sand;
+      } else if (height > (top - 20)) {
+        return BlockType::Dirt;
+      } else if (height >= 0) {
+        return BlockType::Stone;
+      }
+    } break;
+    case BiomeKind::Grassland: {
+      if (height > (top - 6)) {
+        return BlockType::Grass;
+      } else if (height > (top - 20)) {
+        return BlockType::Dirt;
+      } else if (height >= 0) {
+        return BlockType::Stone;
+      }
+    } break;
+    case BiomeKind::Mountains: {
+      if (height > (top - 6)) {
+        return BlockType::Snow;
+      } else if (height > (top - 20)) {
+        return BlockType::Stone;
+      } else if (height >= 0) {
+        return BlockType::Stone;
+      }
+    } break;
+    case BiomeKind::Ocean: {
       return BlockType::Water;
-    case BiomeKind::Forest:
-      return BlockType::Dirt;
+    } break;
+    case BiomeKind::Forest: {
+      if (height > (top - 6)) {
+        return BlockType::Grass;
+      } else if (height > (top - 20)) {
+        return BlockType::Dirt;
+      } else if (height >= 0) {
+        return BlockType::Stone;
+      }
+    } break;
     default:
       return BlockType::Snow;
   }
 
-  int top = CHUNK_HEIGHT - BLOCKS_OF_AIR_ABOVE;
-  if (height > (top - 6)) {
-    return BlockType::Grass;
-  } else if (height > (top - 20)) {
-    return BlockType::Dirt;
-  } else if (height >= 0) {
-    return BlockType::Stone;
-  }
   return BlockType::Unknown;
 }
 
@@ -186,26 +213,19 @@ inline bool IS_TB_LEFT_OF(Chunk &chunk, int x, int y, int z) {
   if (nearx == 0) return true;
   return IS_TB_AT(chunk, nearx, y, z);
 }
-inline BiomeKind biome_kind_at_point(World &world, int x, int y) {
-  // goes from -1.0 to 1.0
-  auto noise = world.biome_noise.fractal(16, x, y);
-  fmt::print("Biome Noise at {}, {} = {}\n", x, y, noise);
+
+inline BiomeKind biome_noise_to_kind_at_point(float noise) {
   if (noise > 0.6) {
     return BiomeKind::Mountains;
-  } else if (noise > 0.2) {
+  } else if (noise > 0.4) {
     return BiomeKind::Forest;
   } else if (noise > 0.0) {
     return BiomeKind::Grassland;
-  } else if (noise > -0.4) {
+  } else if (noise > -0.2) {
     return BiomeKind::Desert;
   } else {
     return BiomeKind::Ocean;
   }
-}
-
-inline Biome &biome_at_point(World &world, int x, int y) {
-  auto bk = biome_kind_at_point(world, x, y);
-  return world.biomes_by_kind[bk];
 }
 
 inline float noise_for_biome_at_point(World &world, Biome &biome, int x,
@@ -218,6 +238,38 @@ inline float noise_for_biome_at_point(World &world, Biome &biome, int x,
   return noise;
 }
 
+void gen_column_at(World &world, Block *output, int x, int y) {
+  auto biome_noise = world.biome_noise.fractal(16, x, y);
+  auto kind = biome_noise_to_kind_at_point(biome_noise);
+  auto bk = world.biomes_by_kind[kind];
+  auto biome_height_noise = bk.noise.fractal(16, x, y);
+  auto noise = (biome_noise * biome_height_noise) * 0.1 +
+               world.height_noise.fractal(16, x, y);
+  int maxHeight = bk.maxHeight;
+  int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
+  for (int height = columnHeight; height >= 0; --height) {
+    Block block;
+    block.type = block_type_for_height(bk, height);
+    output[height] = block;
+  }
+  while (columnHeight < WATER_LEVEL) {
+    output[columnHeight].type = BlockType::Water;
+    columnHeight++;
+  }
+  output[columnHeight + 1].type = BlockType::Air;
+}
+
+// Generates the height map and block types
+void gen_chunk(World &world, Chunk &chunk) {
+  for (int x = 0; x < CHUNK_WIDTH; ++x) {
+    int global_x = chunk.x + x;
+    for (int y = 0; y < CHUNK_LENGTH; ++y) {
+      int global_y = chunk.y + y;
+      gen_column_at(world, &CHUNK_COL_AT(chunk, x, y), global_x, global_y);
+    }
+  }
+}
+
 void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
                    Attrib block_attrib) {
   chunk.mesh = {};
@@ -227,42 +279,7 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
   chunk.y = chunk_y;
 
   // Determine the height map
-  for (int x = 0; x < CHUNK_WIDTH; ++x) {
-    int global_x = chunk.x + x;
-    for (int y = 0; y < CHUNK_LENGTH; ++y) {
-      int global_y = chunk.y + y;
-      auto bk = biome_at_point(world, global_x, global_y);
-      switch (bk.kind) {
-        case BiomeKind::Ocean: {
-          auto noise = noise_for_biome_at_point(world, bk, global_x, global_y);
-          int maxHeight = bk.maxHeight;
-          int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
-          for (int height = columnHeight; height >= 0; --height) {
-            Block block;
-            block.type = block_type_for_height(bk, height);
-            CHUNK_AT(chunk, x, y, height) = block;
-          }
-          // fill everything up to the water level with water
-          for (int height = columnHeight; columnHeight < WATER_LEVEL;
-               ++columnHeight) {
-            CHUNK_AT(chunk, x, y, height).type = BlockType::Water;
-          }
-          CHUNK_AT(chunk, x, y, WATER_LEVEL + 1).type = BlockType::Air;
-        } break;
-        default: {
-          auto noise = noise_for_biome_at_point(world, bk, global_x, global_y);
-          int maxHeight = CHUNK_HEIGHT;
-          int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
-          for (int height = columnHeight; height >= 0; --height) {
-            Block block;
-            block.type = block_type_for_height(bk, height);
-            CHUNK_AT(chunk, x, y, height) = block;
-          }
-          CHUNK_AT(chunk, x, y, columnHeight + 1).type = BlockType::Air;
-        } break;
-      }
-    }
-  }
+  gen_chunk(world, chunk);
 
   // Generate the mesh
   for (int x = 0; x < CHUNK_WIDTH; ++x) {
@@ -404,5 +421,141 @@ void load_chunks_around_player(World &world, WorldPos center_pos) {
 
       ++chunk_idx;
     }
+  }
+}
+
+glm::ivec3 biome_color(BiomeKind bk) {
+  switch (bk) {
+    case BiomeKind::Desert: {
+      return glm::ivec3(194, 178, 128);
+    }
+    case BiomeKind::Forest: {
+      return glm::ivec3(53, 88, 41);
+    }
+    case BiomeKind::Grassland: {
+      return glm::ivec3(143, 177, 78);
+    }
+    case BiomeKind::Mountains: {
+      return glm::ivec3(174, 162, 149);
+    }
+    case BiomeKind::Ocean: {
+      return glm::ivec3(0, 0, 255);
+    }
+    default: {
+      return glm::ivec3(255, 255, 0);
+    }
+  }
+}
+
+#define RGBA(__r, __g, __b, __a) (__r | (__g << 8) | (__b << 16) | (__a << 24));
+#define IMG_GET_PIXEL_AT(__texture, __h, __x, __y) \
+  (*(__texture + (__y * __h + __x)))
+#define RGBA_R(__pix) (__pix >> 0) & 0xFF
+#define RGBA_G(__pix) (__pix >> 8) & 0xFF
+#define RGBA_B(__pix) (__pix >> 16) & 0xFF
+#define RGBA_A(__pix) (__pix >> 24) & 0xFF
+#define RGBA_TO_IVEC(__pix) \
+  glm::ivec4(RGBA_R(__pix), RGBA_G(__pix), RGBA_B(__pix), RGBA_A(__pix))
+
+constexpr int NM_W = 1024;
+constexpr int NM_H = 1024;
+
+#include <bitset>
+
+glm::ivec4 block_kind_color(unsigned char *texture, int w, int h,
+                            BlockType bt) {
+  auto offsetf = block_type_texture_offset(bt);
+  auto offset = glm::ivec2(offsetf.x * (float)w, offsetf.y * (float)h);
+  auto pix = IMG_GET_PIXEL_AT((unsigned int *)texture, h, offset.x, offset.y);
+  auto col = RGBA_TO_IVEC(pix);
+  return col;
+}
+
+void world_dump_heights(World &world) {
+  int width, height, nrChannels;
+  unsigned char *texture =
+      stbi_load("./images/texture.png", &width, &height, &nrChannels, 0);
+  if (!texture) {
+    fmt::print("Failed to load texture\n");
+    return;
+  }
+
+  // biome noise map
+  {
+    fmt::print("Generating a biome noise map dump...\n");
+    auto *whm = new array<array<int, NM_W>, NM_H>();
+    auto *biome_kind_map = new array<array<int, NM_W>, NM_H>();
+    auto *world_height_map = new array<array<int, NM_W>, NM_H>();
+    auto *ortho_view = new array<array<int, NM_W>, NM_H>();
+    fmt::print("Calculating noise...\n");
+    Block col[CHUNK_HEIGHT];
+    for (int x = 0; x < NM_W; ++x) {
+      for (int y = 0; y < NM_H; ++y) {
+        gen_column_at(world, col, x, y);
+
+        // get the top block
+        int topBlockHeight = CHUNK_HEIGHT - 1;
+        while (topBlockHeight > 0 &&
+               col[topBlockHeight].type == BlockType::Air) {
+          topBlockHeight--;
+        }
+        Block topBlock = col[topBlockHeight];
+
+        // full map ortho view
+        {
+          auto c = block_kind_color(texture, width, height, topBlock.type);
+          unsigned int color = RGBA(c.r, c.g, c.b, c.a);
+          (*ortho_view)[x][y] = color;
+        }
+
+        auto biome_noise = world.biome_noise.fractal(16, x, y);
+        // biome noise
+        {
+          int noise_value = round(biome_noise * 256);
+          int r = noise_value;
+          int g = noise_value;
+          int b = noise_value;
+          int a = 255;
+          unsigned int color = RGBA(r, g, b, a);
+          (*whm)[x][y] = color;
+        }
+
+        auto kind = biome_noise_to_kind_at_point(biome_noise);
+        auto bk = world.biomes_by_kind[kind];
+
+        // biome kind
+        {
+          auto bk_color = biome_color(bk.kind);
+          int r = bk_color.r;
+          int g = bk_color.g;
+          int b = bk_color.b;
+          int a = 255;
+          unsigned int color = RGBA(r, g, b, a);
+          (*biome_kind_map)[x][y] = color;
+        }
+
+        // heightmap
+        {
+          auto noise = noise_for_biome_at_point(world, bk, x, y);
+          int noise_value = round(noise * 256);
+          int r = noise_value;
+          int g = noise_value;
+          int b = noise_value;
+          int a = 255;
+          unsigned int color = RGBA(r, g, b, a);
+          (*world_height_map)[x][y] = color;
+        }
+      }
+    }
+    fmt::print("Done with noise.\n");
+    fmt::print("Writing the images...\n");
+    stbi_write_png("temp/world_biome_noise.png", NM_W, NM_H, 4, whm->data(), 0);
+    stbi_write_png("temp/biome_kind.png", NM_W, NM_H, 4, biome_kind_map->data(),
+                   0);
+    stbi_write_png("temp/heightmap.png", NM_W, NM_H, 4,
+                   world_height_map->data(), 0);
+    stbi_write_png("temp/ortho.png", NM_W, NM_H, 4, ortho_view->data(), 0);
+    fmt::print("Done.\n");
+    delete whm;
   }
 }

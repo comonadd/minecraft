@@ -88,7 +88,9 @@ struct World {
   Attrib block_attrib;
   siv::PerlinNoise perlin;
   SimplexNoise simplex{0.1f, 1.0f, 2.0f, 0.5f};
-  SimplexNoise biome_noise{0.01f, 1.0f, 2.0f, 0.5f};
+
+  SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
+  SimplexNoise biome_noise{0.0005f, 1.0f, 2.0f, 0.5f};
 
   std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
       // Desert
@@ -119,7 +121,7 @@ struct World {
       {BiomeKind::Mountains,
        Biome{.kind = BiomeKind::Mountains,
              .maxHeight = CHUNK_HEIGHT,
-             .noise = SimplexNoise{0.35f, 1.0f, 2.0f, 0.5f}}},
+             .noise = SimplexNoise{1.00f, 1.0f, 2.0f, 0.5f}}},
   };
 };
 
@@ -128,5 +130,7 @@ void load_chunks_around_player(World& world, WorldPos center_pos);
 void place_block_at(World& world, BlockType type, WorldPos pos);
 
 Block chunk_get_block_at_global(Chunk* chunk, WorldPos pos);
+
+void world_dump_heights(World& world);
 
 #endif
