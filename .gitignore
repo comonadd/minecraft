@@ -4,5 +4,5 @@ Debug/
 compile_commands.json
 third-party/
 cmake-build-debug
-images/
 .idea
+temp/
