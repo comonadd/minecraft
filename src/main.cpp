@@ -64,6 +64,8 @@ struct {
   float speed = 32.0f;
   glm::vec3 camera_up = glm::vec3(0.0, 0.1, 0.0);
 
+  WorldPos player_pos;
+
   GLuint shader;
 
   std::vector<Entity> entities;
@@ -208,7 +210,10 @@ void render_info_bar() {
   ImGui::SameLine();
   ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
               1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-  ImGui::Text("Chunks loaded: %u", state.world.loaded_chunks.size());
+  ImGui::Text("Chunks loaded: %lu", state.world.loaded_chunks.size());
+  ImGui::Text("X=%i, Y=%i, Z=%i", (int)round(state.camera_pos.x),
+              (int)round(state.camera_pos.y), (int)round(state.camera_pos.z));
+  ImGui::Text("Biome: %s", get_biome_name_at(state.world, state.player_pos));
   float mem_usage_kb = (float)u.ru_maxrss;
   ImGui::Text("Total memory usage: %f MB", round(mem_usage_kb / 1024.0F));
   ImGui::Text("Render distance: %i", state.rendering_distance);
@@ -300,6 +305,9 @@ void update() {
   state.last_frame = current_frame;
 
   process_keys();
+
+  state.player_pos =
+      glm::ivec3{state.camera_pos.x, state.camera_pos.y, state.camera_pos.z};
 
   if (state.mode == Mode::Playing) {
 #ifdef MEMORY_DEBUG

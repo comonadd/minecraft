@@ -75,6 +75,7 @@ struct Biome {
   BiomeKind kind;
   int maxHeight;
   SimplexNoise noise;
+  const char* name;
 };
 
 const int WATER_LEVEL = 30;
@@ -94,33 +95,48 @@ struct World {
   std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
       // Desert
       {BiomeKind::Desert,
-       Biome{.kind = BiomeKind::Desert,
-             .maxHeight = CHUNK_HEIGHT,
-             .noise = SimplexNoise{0.01f, 1.0f, 2.0f, 0.5f}}},
+       Biome{
+           .kind = BiomeKind::Desert,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = SimplexNoise{0.01f, 1.0f, 2.0f, 0.5f},
+           .name = "Desert",
+       }},
 
       // Forest
       {BiomeKind::Forest,
-       Biome{.kind = BiomeKind::Forest,
-             .maxHeight = CHUNK_HEIGHT,
-             .noise = SimplexNoise{0.03f, 1.0f, 2.0f, 0.5f}}},
+       Biome{
+           .kind = BiomeKind::Forest,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = SimplexNoise{0.03f, 1.0f, 2.0f, 0.5f},
+           .name = "Forest",
+       }},
 
       // Grassland
       {BiomeKind::Grassland,
-       Biome{.kind = BiomeKind::Grassland,
-             .maxHeight = CHUNK_HEIGHT,
-             .noise = SimplexNoise{0.025f, 1.0f, 2.0f, 0.5f}}},
+       Biome{
+           .kind = BiomeKind::Grassland,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = SimplexNoise{0.025f, 1.0f, 2.0f, 0.5f},
+           .name = "Grassland",
+       }},
 
       // Oceans
       {BiomeKind::Ocean,
-       Biome{.kind = BiomeKind::Ocean,
-             .maxHeight = WATER_LEVEL,
-             .noise = SimplexNoise{0.001f, 1.0f, 2.0f, 0.5f}}},
+       Biome{
+           .kind = BiomeKind::Ocean,
+           .maxHeight = WATER_LEVEL,
+           .noise = SimplexNoise{0.001f, 1.0f, 2.0f, 0.5f},
+           .name = "Ocean",
+       }},
 
       // Mountains
       {BiomeKind::Mountains,
-       Biome{.kind = BiomeKind::Mountains,
-             .maxHeight = CHUNK_HEIGHT,
-             .noise = SimplexNoise{1.00f, 1.0f, 2.0f, 0.5f}}},
+       Biome{
+           .kind = BiomeKind::Mountains,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = SimplexNoise{1.00f, 1.0f, 2.0f, 0.5f},
+           .name = "Mountains",
+       }},
   };
 };
 
@@ -132,5 +148,7 @@ void place_block_at(World& world, BlockType type, WorldPos pos);
 Block chunk_get_block_at_global(Chunk* chunk, WorldPos pos);
 
 void world_dump_heights(World& world);
+
+const char* get_biome_name_at(World& world, WorldPos pos);
 
 #endif

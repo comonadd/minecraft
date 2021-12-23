@@ -240,8 +240,12 @@ inline float noise_for_biome_at_point(World &world, Biome &biome, int x,
   return noise;
 }
 
+inline float biome_noise_at(World &world, int x, int y) {
+  return world.biome_noise.fractal(16, x, y);
+}
+
 void gen_column_at(World &world, Block *output, int x, int y) {
-  auto biome_noise = world.biome_noise.fractal(16, x, y);
+  auto biome_noise = biome_noise_at(world, x, y);
   auto kind = biome_noise_to_kind_at_point(biome_noise);
   auto bk = world.biomes_by_kind[kind];
   auto biome_height_noise = bk.noise.fractal(16, x, y);
@@ -573,7 +577,7 @@ void world_dump_heights(World &world) {
           (*ortho_view)[x][y] = color;
         }
 
-        auto biome_noise = world.biome_noise.fractal(16, x, y);
+        auto biome_noise = biome_noise_at(world, x, y);
         // biome noise
         {
           int noise_value = round(biome_noise * 256);
@@ -623,4 +627,16 @@ void world_dump_heights(World &world) {
     fmt::print("Done.\n");
     delete whm;
   }
+}
+
+inline Biome biome_at_point(World &world, WorldPos pos) {
+  auto biome_noise = biome_noise_at(world, pos.x, pos.z);
+  auto kind = biome_noise_to_kind_at_point(biome_noise);
+  auto biome = world.biomes_by_kind[kind];
+  return biome;
+}
+
+const char *get_biome_name_at(World &world, WorldPos pos) {
+  const auto &biome = biome_at_point(world, pos);
+  return biome.name;
 }
