@@ -22,7 +22,6 @@ struct Block {
 const int CHUNK_LENGTH = 16;
 const int CHUNK_WIDTH = CHUNK_LENGTH;
 const int CHUNK_HEIGHT = 64;
-const float radius = 16;
 const int BLOCKS_OF_AIR_ABOVE = 20;
 
 extern float BLOCK_WIDTH;
@@ -37,6 +36,8 @@ struct VertexData {
   glm::vec3 pos;
   glm::vec3 normal;
   glm::vec2 uv;
+  float ao;
+  float light;
 };
 
 using ChunkMesh = std::vector<VertexData>;
@@ -53,8 +54,6 @@ struct Chunk {
 
   // array buffer
   GLuint buffer = 0;
-
-  GLuint VAO = 0;
 };
 
 using ChunkId = long;
@@ -82,8 +81,8 @@ const int WATER_LEVEL = 30;
 
 struct World {
   int seed = 3849534;
-  std::vector<shared_ptr<Chunk>> chunks{(size_t)(4 * (radius * radius))};
-  std::unordered_map<ChunkId, std::shared_ptr<Chunk>> loaded_chunks;
+  std::vector<Chunk*> chunks{};
+  std::unordered_map<ChunkId, Chunk*> loaded_chunks;
 
   Attrib block_attrib;
   siv::PerlinNoise perlin;
@@ -125,7 +124,8 @@ struct World {
   };
 };
 
-void load_chunks_around_player(World& world, WorldPos center_pos);
+void load_chunks_around_player(World& world, WorldPos center_pos,
+                               uint32_t radius);
 
 void place_block_at(World& world, BlockType type, WorldPos pos);
 

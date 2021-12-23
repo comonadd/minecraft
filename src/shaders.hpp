@@ -9,6 +9,8 @@ struct Attrib {
   GLint position;
   GLint normal;
   GLint uv;
+  GLint ao;
+  GLint light;
   GLint MVP;
 };
 

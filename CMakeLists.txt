@@ -14,7 +14,16 @@ endif ()
 
 set(sources
   ${platform_sources}
-  ${src}/main.cpp ${src}/util.cpp ${src}/shaders.cpp ${src}/world.cpp third-party/SimplexNoise/src/SimplexNoise.cpp)
+  ${src}/main.cpp ${src}/util.cpp ${src}/shaders.cpp
+  ${src}/world.cpp
+  third-party/SimplexNoise/src/SimplexNoise.cpp
+  third-party/imgui/imgui.cpp
+  third-party/imgui/imgui_draw.cpp
+  third-party/imgui/imgui_widgets.cpp
+  third-party/imgui/imgui_tables.cpp
+  third-party/imgui/backends/imgui_impl_opengl3.cpp
+  third-party/imgui/backends/imgui_impl_glfw.cpp
+)
 
 set(CMAKE_CXX_STANDARD 20)
 add_compile_options(-Wall)
@@ -28,7 +37,12 @@ endif ()
 
 include_directories(./third-party)
 
+include_directories(./third-party/imgui/backends)
+include_directories(./third-party/imgui)
+
 add_executable(${TARGET} ${sources})
+
+# target_link_libraries(${TARGET} ${CMAKE_DL_LIBS})
 
 find_package(Threads)
 target_link_libraries(${TARGET} ${CMAKE_THREAD_LIBS_INIT})
@@ -44,4 +58,10 @@ find_package(glfw3 3.3 REQUIRED)
 target_link_libraries(${TARGET} glfw)
 
 find_package(OpenGL REQUIRED)
-target_link_libraries(${TARGET} OpenGL::GL)
+target_link_libraries(${TARGET} OpenGL::GL ${CMAKE_DL_LIBS})
+
+# Performance debug (gperftools)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+link_directories(./third-party/gperftools)
+target_link_libraries(${TARGET} tcmalloc profiler)
+

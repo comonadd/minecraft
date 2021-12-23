@@ -3,6 +3,8 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <fmt/core.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 
 #include <fstream>
 #include <glm/glm.hpp>
@@ -18,6 +20,13 @@
 #include "SimplexNoise/src/SimplexNoise.h"
 #include "shaders.hpp"
 #define STB_IMAGE_IMPLEMENTATION
+#include <gperftools/heap-profiler.h>
+#include <gperftools/profiler.h>
+#include <gperftools/tcmalloc.h>
+
+#include "imgui/backends/imgui_impl_glfw.h"
+#include "imgui/backends/imgui_impl_opengl3.h"
+#include "imgui/imgui.h"
 #include "stb/stb_image.h"
 #include "util.hpp"
 #include "world.hpp"
@@ -29,6 +38,12 @@ struct Entity {
   GLuint vbo;
   GLuint colorbuffer;
   GLuint texture;
+};
+
+// Determines what to show
+enum class Mode {
+  Playing = 0,
+  Menu = 1,
 };
 
 struct {
@@ -62,6 +77,12 @@ struct {
   // TODO: Also need to change the clipping distance based on the chunk radius
   glm::mat4 Projection = glm::perspective(
       glm::radians(45.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 800.0f);
+
+  int rendering_distance = 4;
+
+  Mode mode = Mode::Playing;
+
+  GLuint chunk_vao = 0;
 } state;
 
 struct Texture {
@@ -151,7 +172,191 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
   }
 }
 
+void quit() { glfwSetWindowShouldClose(state.window, GL_TRUE); }
+
+void toggle_menu() {
+  state.mode = state.mode == Mode::Menu ? Mode::Playing : Mode::Menu;
+}
+
+void process_keys() {
+  auto *window = state.window;
+
+  // movement
+  float mov_vel = state.speed * state.delta_time;
+  if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    state.camera_pos += mov_vel * state.camera_front;
+  if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    state.camera_pos -= mov_vel * state.camera_front;
+  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+    state.camera_pos -=
+        glm::normalize(glm::cross(state.camera_front, state.camera_up)) *
+        mov_vel;
+  if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+    state.camera_pos +=
+        glm::normalize(glm::cross(state.camera_front, state.camera_up)) *
+        mov_vel;
+}
+
+void render_info_bar() {
+  rusage u;
+  int res = getrusage(RUSAGE_SELF, &u);
+  if (res != 0) {
+    // do something
+  }
+  ImGui::Begin("Hello, world!");
+  ImGui::Text("Information");
+  ImGui::SameLine();
+  ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
+              1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+  ImGui::Text("Chunks loaded: %u", state.world.loaded_chunks.size());
+  float mem_usage_kb = (float)u.ru_maxrss;
+  ImGui::Text("Total memory usage: %f MB", round(mem_usage_kb / 1024.0F));
+  ImGui::Text("Render distance: %i", state.rendering_distance);
+  ImGui::End();
+}
+
+void render_menu() {
+  ImGui::Begin("Game menu");
+  ImGui::Text("Game menu");
+  // Rendering distance slider
+  float rdf = (float)state.rendering_distance;
+  ImGui::SliderFloat("float", &rdf, 0.0f, 32.0f);
+  state.rendering_distance = round(rdf);
+  ImGui::End();
+}
+
+void render_world() {
+  auto block_attrib = state.world.block_attrib;
+  GLsizei stride = sizeof(GLfloat) * 10;
+  glUseProgram(block_attrib.shader);
+  for (auto &chunk : state.world.chunks) {
+    glBindVertexArray(state.chunk_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, chunk->buffer);
+
+    // MV
+    glm::mat4 View =
+        glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
+                    state.camera_up);
+    glm::mat4 mvp = state.Projection * View;
+    glUniformMatrix4fv(block_attrib.MVP, 1, GL_FALSE, &mvp[0][0]);
+
+    glEnableVertexAttribArray(block_attrib.position);
+    glEnableVertexAttribArray(block_attrib.normal);
+    glEnableVertexAttribArray(block_attrib.uv);
+    glEnableVertexAttribArray(block_attrib.ao);
+    glEnableVertexAttribArray(block_attrib.light);
+
+    glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, pos));
+    glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, normal));
+    glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, uv));
+    glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, ao));
+    glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, light));
+
+    // render the chunk mesh
+    // fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
+    glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
+
+    glDisableVertexAttribArray(block_attrib.position);
+    glDisableVertexAttribArray(block_attrib.normal);
+    glDisableVertexAttribArray(block_attrib.uv);
+    glDisableVertexAttribArray(block_attrib.ao);
+    glDisableVertexAttribArray(block_attrib.light);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+  }
+}
+
+void render() {
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+
+  switch (state.mode) {
+    case Mode::Playing: {
+      render_info_bar();
+      render_world();
+    } break;
+    case Mode::Menu: {
+      render_menu();
+    } break;
+  }
+
+  ImGui::Render();
+  int display_w, display_h;
+  glfwGetFramebufferSize(state.window, &display_w, &display_h);
+  glViewport(0, 0, display_w, display_h);
+  ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+void update() {
+  float current_frame = glfwGetTime();
+  state.delta_time = current_frame - state.last_frame;
+  state.last_frame = current_frame;
+
+  process_keys();
+
+  if (state.mode == Mode::Playing) {
+#ifdef MEMORY_DEBUG
+    HeapProfilerStart("output_inside.prof");
+#endif MEMORY_DEBUG
+    load_chunks_around_player(state.world, state.camera_pos,
+                              state.rendering_distance);
+#ifdef MEMORY_DEBUG
+    HeapProfilerStop();
+#endif MEMORY_DEBUG
+  }
+}
+
+void setup_noise() {
+  const siv::PerlinNoise perlin(state.world.seed);
+  state.world.perlin = perlin;
+}
+
+void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
+                                GLenum severity, GLsizei length,
+                                const GLchar *message, const void *userParam) {
+  // buffer memory stuff warning
+  if (type == 0x8251) return;
+  fprintf(stderr,
+          "GL CALLBACK: %s type = 0x%x, severity = 0x%x, message = %s\n",
+          (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : ""), type, severity,
+          message);
+}
+
+void reset_chunks() {
+  for (auto &p : state.world.loaded_chunks) {
+    // deallocate buffers
+    auto &chunk = p.second;
+    // glDeleteVertexArrays(1, &chunk->VAO);
+    glDeleteBuffers(1, &chunk->buffer);
+    delete chunk;
+  }
+  state.world.chunks.clear();
+  state.world.loaded_chunks.clear();
+}
+
+void key_callback(GLFWwindow *window, int key, int scancode, int action,
+                  int mods) {
+  if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
+    quit();
+  } else if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+    toggle_menu();
+  } else if (key == GLFW_KEY_H && action == GLFW_PRESS) {
+    // Generate world map picture
+    world_dump_heights(state.world);
+  } else if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+    reset_chunks();
+  }
+}
+
 void init_graphics() {
+  const char *glsl_version = "#version 150";
   glfwInit();
 
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -173,101 +378,24 @@ void init_graphics() {
 
   // glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
   glfwSetCursorPosCallback(state.window, mouse_callback);
-}
+  glfwSetKeyCallback(state.window, key_callback);
 
-void quit() { glfwSetWindowShouldClose(state.window, GL_TRUE); }
+  // Setup Dear ImGui context
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO &io = ImGui::GetIO();
+  (void)io;
 
-void process_keys() {
-  auto *window = state.window;
+  // Setup Dear ImGui style
+  ImGui::StyleColorsDark();
+  // ImGui::StyleColorsClassic();
 
-  if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS ||
-      glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) {
-    quit();
-  } else if (glfwGetKey(window, GLFW_KEY_H) == GLFW_PRESS) {
-    // Generate world map picture
-    world_dump_heights(state.world);
-  }
+  // Setup Platform/Renderer backends
+  ImGui_ImplGlfw_InitForOpenGL(state.window, true);
+  ImGui_ImplOpenGL3_Init(glsl_version);
 
-  float mov_vel = state.speed * state.delta_time;
-
-  if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-    state.camera_pos += mov_vel * state.camera_front;
-  if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-    state.camera_pos -= mov_vel * state.camera_front;
-  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-    state.camera_pos -=
-        glm::normalize(glm::cross(state.camera_front, state.camera_up)) *
-        mov_vel;
-  if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-    state.camera_pos +=
-        glm::normalize(glm::cross(state.camera_front, state.camera_up)) *
-        mov_vel;
-}
-
-void render() {
-  auto block_attrib = state.world.block_attrib;
-  GLsizei stride = sizeof(GLfloat) * 8;
-  glUseProgram(block_attrib.shader);
-  for (auto &chunk : state.world.chunks) {
-    glBindVertexArray(chunk->VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, chunk->buffer);
-
-    // MV
-    glm::mat4 View =
-        glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
-                    state.camera_up);
-    glm::mat4 mvp = state.Projection * View;
-    glUniformMatrix4fv(block_attrib.MVP, 1, GL_FALSE, &mvp[0][0]);
-
-    glEnableVertexAttribArray(block_attrib.position);
-    //    glEnableVertexAttribArray(block_attrib.normal);
-    glEnableVertexAttribArray(block_attrib.uv);
-
-    glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE, stride,
-                          (void *)offsetof(VertexData, pos));
-    //    glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE,
-    //    stride,
-    //                          (void *)offsetof(VertexData, normal));
-    glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
-                          (void *)offsetof(VertexData, uv));
-
-    // render the chunk mesh
-    // fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
-    glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
-
-    glDisableVertexAttribArray(block_attrib.position);
-    //    glDisableVertexAttribArray(block_attrib.normal);
-    glDisableVertexAttribArray(block_attrib.uv);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
-  }
-}
-
-void update() {
-  float current_frame = glfwGetTime();
-  state.delta_time = current_frame - state.last_frame;
-  state.last_frame = current_frame;
-
-  process_keys();
-
-  load_chunks_around_player(state.world, state.camera_pos);
-}
-
-void setup_noise() {
-  const siv::PerlinNoise perlin(state.world.seed);
-  state.world.perlin = perlin;
-}
-
-void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
-                                GLenum severity, GLsizei length,
-                                const GLchar *message, const void *userParam) {
-  // buffer memory stuff warning
-  if (type == 0x8251) return;
-  fprintf(stderr,
-          "GL CALLBACK: %s type = 0x%x, severity = 0x%x, message = %s\n",
-          (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : ""), type, severity,
-          message);
+  // Chunk VAO
+  glGenVertexArrays(1, &state.chunk_vao);
 }
 
 int main() {
@@ -287,6 +415,8 @@ int main() {
   block_attrib.position = glGetAttribLocation(block_attrib.shader, "position");
   block_attrib.normal = glGetAttribLocation(block_attrib.shader, "normal");
   block_attrib.uv = glGetAttribLocation(block_attrib.shader, "texUV");
+  block_attrib.ao = glGetAttribLocation(block_attrib.shader, "ao");
+  block_attrib.light = glGetAttribLocation(block_attrib.shader, "light");
   block_attrib.MVP = glGetUniformLocation(basic_shader, "MVP");
   state.world.block_attrib = block_attrib;
 
@@ -302,6 +432,13 @@ int main() {
     glfwPollEvents();
   }
 
+  // Cleanup
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+
+  glfwDestroyWindow(state.window);
   glfwTerminate();
+
   return 0;
 }

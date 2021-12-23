@@ -25,7 +25,7 @@ int round_to_nearest_16(int number) {
   return result;
 }
 
-inline shared_ptr<Chunk> is_chunk_loaded(World &world, int x, int y) {
+inline Chunk *is_chunk_loaded(World &world, int x, int y) {
   auto ch = world.loaded_chunks.find(chunk_id_from_coords(x, y));
   bool loaded = ch != world.loaded_chunks.end();
   // fmt::print("{},{} is loaded: {}\n", x, y, loaded);
@@ -87,16 +87,15 @@ inline glm::vec2 uv_for_block_type(BlockType bt) {
   return {0.0, 0.0};
 }
 
-inline WorldPos chunk_global_to_local_pos(shared_ptr<Chunk> chunk,
-                                          WorldPos pos) {
+inline WorldPos chunk_global_to_local_pos(Chunk *chunk, WorldPos pos) {
   return glm::ivec3(pos.x - chunk->x, pos.y - chunk->y, pos.z);
 }
 
-inline Block chunk_get_block(shared_ptr<Chunk> chunk, glm::ivec3 local_pos) {
+inline Block chunk_get_block(Chunk *chunk, glm::ivec3 local_pos) {
   return chunk->blocks[local_pos.x][local_pos.y][local_pos.z];
 }
 
-inline Block chunk_get_block_at_global(shared_ptr<Chunk> chunk, WorldPos pos) {
+inline Block chunk_get_block_at_global(Chunk *chunk, WorldPos pos) {
   auto local_pos = chunk_global_to_local_pos(chunk, pos);
   return chunk_get_block(chunk, local_pos);
 }
@@ -122,10 +121,11 @@ glm::vec2 block_type_texture_offset_for_face(int face) {
   return block_type_texture_offset((BlockType)(face + debugFaceTexturesOffset));
 }
 
-void make_cube_faces(ChunkMesh &mesh, int left, int right, int top, int bottom,
-                     int front, int back, int wleft, int wright, int wtop,
-                     int wbottom, int wfront, int wback, float x, float y,
-                     float z, float n, BlockType block_type) {
+void make_cube_faces(ChunkMesh &mesh, float ao[6][4], float light[6][4],
+                     int left, int right, int top, int bottom, int front,
+                     int back, int wleft, int wright, int wtop, int wbottom,
+                     int wfront, int wback, float x, float y, float z, float n,
+                     BlockType block_type) {
   glm::vec2 texture_offset = block_type_texture_offset(block_type);
   static const float positions[6][4][3] = {
       {{-1, -1, -1}, {-1, -1, +1}, {-1, +1, -1}, {-1, +1, +1}},
@@ -172,6 +172,8 @@ void make_cube_faces(ChunkMesh &mesh, int left, int right, int top, int bottom,
           texture_offset.x + (uvs[i][j][0] ? b : a),  // x
           texture_offset.y + (uvs[i][j][1] ? b : a)   // y
       };
+      vd.ao = ao[i][j];
+      vd.light = light[i][j];
       // vd.uv.r = dv + (uvs[i][j][1] ? b : a);
       mesh.push_back(vd);
     }
@@ -270,11 +272,51 @@ void gen_chunk(World &world, Chunk &chunk) {
   }
 }
 
+void occlusion(char neighbors[27], char lights[27], float shades[27],
+               float ao[6][4], float light[6][4]) {
+  static const int lookup3[6][4][3] = {
+      {{0, 1, 3}, {2, 1, 5}, {6, 3, 7}, {8, 5, 7}},
+      {{18, 19, 21}, {20, 19, 23}, {24, 21, 25}, {26, 23, 25}},
+      {{6, 7, 15}, {8, 7, 17}, {24, 15, 25}, {26, 17, 25}},
+      {{0, 1, 9}, {2, 1, 11}, {18, 9, 19}, {20, 11, 19}},
+      {{0, 3, 9}, {6, 3, 15}, {18, 9, 21}, {24, 15, 21}},
+      {{2, 5, 11}, {8, 5, 17}, {20, 11, 23}, {26, 17, 23}}};
+  static const int lookup4[6][4][4] = {
+      {{0, 1, 3, 4}, {1, 2, 4, 5}, {3, 4, 6, 7}, {4, 5, 7, 8}},
+      {{18, 19, 21, 22}, {19, 20, 22, 23}, {21, 22, 24, 25}, {22, 23, 25, 26}},
+      {{6, 7, 15, 16}, {7, 8, 16, 17}, {15, 16, 24, 25}, {16, 17, 25, 26}},
+      {{0, 1, 9, 10}, {1, 2, 10, 11}, {9, 10, 18, 19}, {10, 11, 19, 20}},
+      {{0, 3, 9, 12}, {3, 6, 12, 15}, {9, 12, 18, 21}, {12, 15, 21, 24}},
+      {{2, 5, 11, 14}, {5, 8, 14, 17}, {11, 14, 20, 23}, {14, 17, 23, 26}}};
+  static const float curve[4] = {0.0, 0.25, 0.5, 0.75};
+  for (int i = 0; i < 6; i++) {
+    for (int j = 0; j < 4; j++) {
+      int corner = neighbors[lookup3[i][j][0]];
+      int side1 = neighbors[lookup3[i][j][1]];
+      int side2 = neighbors[lookup3[i][j][2]];
+      int value = side1 && side2 ? 3 : corner + side1 + side2;
+      float shade_sum = 0;
+      float light_sum = 0;
+      int is_light = lights[13] == 15;
+      for (int k = 0; k < 4; k++) {
+        shade_sum += shades[lookup4[i][j][k]];
+        light_sum += lights[lookup4[i][j][k]];
+      }
+      if (is_light) {
+        light_sum = 15 * 4 * 10;
+      }
+      float total = curve[value] + shade_sum / 4.0;
+      ao[i][j] = min<float>(total, 1.0);
+      light[i][j] = light_sum / 15.0 / 4.0;
+    }
+  }
+}
+
 void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
                    Attrib block_attrib) {
   chunk.mesh = {};
 
-  fmt::print("Loading chunk at {}, {}\n", chunk_x, chunk_y);
+  // fmt::print("Loading chunk at {}, {}\n", chunk_x, chunk_y);
   chunk.x = chunk_x;
   chunk.y = chunk_y;
 
@@ -313,8 +355,38 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
         int wfront = 0;
         int wback = 0;
         float n = 0.5;  // scaling
-        make_cube_faces(chunk.mesh, left, right, top, bottom, front, back,
-                        wleft, wright, wtop, wbottom, wfront, wback,
+
+        float ao[6][4] = {0};
+        float light[6][4] = {{0.5, 0.5, 0.5, 0.5}, {0.5, 0.5, 0.5, 0.5},
+                             {0.5, 0.5, 0.5, 0.5}, {0.5, 0.5, 0.5, 0.5},
+                             {0.5, 0.5, 0.5, 0.5}, {0.5, 0.5, 0.5, 0.5}};
+
+        // char neighbors[27] = {0};
+        // char lights[27] = {0};
+        // float shades[27] = {0};
+        // int index = 0;
+        // for (int dx = -1; dx <= 1; dx++) {
+        //   for (int dy = -1; dy <= 1; dy++) {
+        //     for (int dz = -1; dz <= 1; dz++) {
+        //       neighbors[index] = opaque[XYZ(x + dx, y + dy, z + dz)];
+        //       lights[index] = light[XYZ(x + dx, y + dy, z + dz)];
+        //       shades[index] = 0;
+        //       if (y + dy <= highest[XZ(x + dx, z + dz)]) {
+        //         for (int oy = 0; oy < 8; oy++) {
+        //           if (opaque[XYZ(x + dx, y + dy + oy, z + dz)]) {
+        //             shades[index] = 1.0 - oy * 0.125;
+        //             break;
+        //           }
+        //         }
+        //       }
+        //       index++;
+        //     }
+        //   }
+        // }
+        // occlusion(neighbors, lights, shades, ao, light);
+
+        make_cube_faces(chunk.mesh, ao, light, left, right, top, bottom, front,
+                        back, wleft, wright, wtop, wbottom, wfront, wback,
                         (float)global_x, (float)height, (float)global_y, n,
                         block.type);
         column--;
@@ -336,20 +408,12 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
   auto mesh_size = sizeof(chunk.mesh[0]) * chunk.mesh.size();
   auto *meshp = &chunk.mesh[0];
 
-  if (chunk.VAO == 0) {
-    glGenVertexArrays(1, &chunk.VAO);
-  }
-
-  glBindVertexArray(chunk.VAO);
-
   glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);
 
   glBindBuffer(GL_ARRAY_BUFFER, 0);
-  glBindVertexArray(0);
 }
 
-void chunk_modify_block_at_global(shared_ptr<Chunk> chunk, WorldPos pos,
-                                  BlockType type) {
+void chunk_modify_block_at_global(Chunk *chunk, WorldPos pos, BlockType type) {
   auto local_pos = chunk_global_to_local_pos(chunk, pos);
   Block b;
   b.type = type;
@@ -359,7 +423,7 @@ void chunk_modify_block_at_global(shared_ptr<Chunk> chunk, WorldPos pos,
 
 void place_block_at(World &world, BlockType type, WorldPos pos) {
   // determine which chunk is affected
-  shared_ptr<Chunk> chunk = nullptr;
+  Chunk *chunk = nullptr;
   for (auto &ch : world.chunks) {
     auto pos_inside = (pos.x > ch->x && pos.x < ch->x + CHUNK_WIDTH) &&
                       (pos.y > ch->y && pos.y < ch->y + CHUNK_LENGTH);
@@ -386,7 +450,8 @@ inline bool can_place_at_block(BlockType type) {
   }
 }
 
-void load_chunks_around_player(World &world, WorldPos center_pos) {
+void load_chunks_around_player(World &world, WorldPos center_pos,
+                               uint32_t radius) {
   int center_x = center_pos.x;
   int center_y = center_pos.z;
 
@@ -407,7 +472,7 @@ void load_chunks_around_player(World &world, WorldPos center_pos) {
       bool loaded = loaded_ch != nullptr;
 
       if (!loaded) {
-        loaded_ch = make_shared<Chunk>(Chunk());
+        loaded_ch = new Chunk();
         load_chunk_at(world, chunk_x, chunk_y, *loaded_ch, world.block_attrib);
         world.loaded_chunks.insert(
             {chunk_id_from_coords(chunk_x, chunk_y), loaded_ch});

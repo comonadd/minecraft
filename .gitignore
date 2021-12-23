@@ -6,3 +6,5 @@ third-party/
 cmake-build-debug
 .idea
 temp/
+imgui.ini
+*.prof*
