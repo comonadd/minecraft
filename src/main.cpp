@@ -180,6 +180,11 @@ void render_info_bar() {
   float mem_usage_kb = (float)u.ru_maxrss;
   ImGui::Text("Total memory usage: %f MB", round(mem_usage_kb / 1024.0F));
   ImGui::Text("Render distance: %i", state.rendering_distance);
+  int total_vertices = 0;
+  for (auto &chunk : state.world.chunks) {
+    total_vertices += chunk->mesh_size;
+  }
+  ImGui::Text("Vertices to render: %i", total_vertices);
   ImGui::End();
 }
 
@@ -206,9 +211,6 @@ void render_world() {
     for (auto &chunk : state.world.chunks) {
       glBindVertexArray(chunk->vao);
       // render the chunk mesh
-#ifdef DEBUG_RENDER
-      fmt::print("Rendering {} vertices! \n", chunk->mesh_size);
-#endif
       glDrawArrays(GL_TRIANGLES, 0, chunk->mesh_size);
       glBindVertexArray(0);
     }
