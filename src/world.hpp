@@ -14,11 +14,22 @@
 
 using WorldPos = glm::ivec3;
 
-enum class BlockType { Dirt, Grass, Stone, Water, Sand, Snow, Air, Unknown };
+enum class BlockType : u8 {
+  Dirt,
+  Grass,
+  Stone,
+  Water,
+  Sand,
+  Snow,
+  Air,
+  Unknown
+};
 
+#pragma pack(push, 1)
 struct Block {
   BlockType type = BlockType::Air;
 };
+#pragma pack(pop)
 
 const int CHUNK_LENGTH = 16;
 const int CHUNK_WIDTH = CHUNK_LENGTH;
@@ -46,12 +57,14 @@ using ChunkMesh = std::vector<VertexData>;
 struct Chunk {
   Block blocks[CHUNK_LENGTH][CHUNK_WIDTH][CHUNK_HEIGHT];
   uint32_t height = 0;
-  ChunkMesh mesh;
 
   int x;
   int y;
   // this flag is set to true if any of the blocks in the chunk has been changed
   bool is_dirty = false;
+
+  // contains information on the size of the mesh stored in chunk.VAO
+  u32 mesh_size = 0;
 
   // GL buffers
   GLuint buffer = 0;

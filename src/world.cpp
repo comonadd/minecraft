@@ -311,7 +311,7 @@ void occlusion(char neighbors[27], char lights[27], float shades[27],
 }
 
 void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
-  chunk.mesh = {};
+  auto *mesh = new ChunkMesh();
 
   // fmt::print("Loading chunk at {}, {}\n", chunk_x, chunk_y);
   chunk.x = chunk_x;
@@ -382,8 +382,8 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
         // }
         // occlusion(neighbors, lights, shades, ao, light);
 
-        make_cube_faces(chunk.mesh, ao, light, left, right, top, bottom, front,
-                        back, wleft, wright, wtop, wbottom, wfront, wback,
+        make_cube_faces(*mesh, ao, light, left, right, top, bottom, front, back,
+                        wleft, wright, wtop, wbottom, wfront, wback,
                         (float)global_x, (float)height, (float)global_y, n,
                         block.type);
         column--;
@@ -404,8 +404,9 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
   // Update chunk buffer mesh data
   glBindBuffer(GL_ARRAY_BUFFER, chunk.buffer);
   // so update the chunk buffer
-  auto mesh_size = sizeof(chunk.mesh[0]) * chunk.mesh.size();
-  auto *meshp = &chunk.mesh[0];
+  auto mesh_size = sizeof((*mesh)[0]) * mesh->size();
+  auto *meshp = mesh->data();
+  chunk.mesh_size = mesh->size();
   glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);
 
   // Update VAO settings
@@ -433,6 +434,8 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
 
   // we've regenerated the chunk mesh
   chunk.is_dirty = false;
+
+  delete mesh;
 }
 
 void chunk_modify_block_at_global(Chunk *chunk, WorldPos pos, BlockType type) {

@@ -207,9 +207,9 @@ void render_world() {
       glBindVertexArray(chunk->vao);
       // render the chunk mesh
 #ifdef DEBUG_RENDER
-      fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
+      fmt::print("Rendering {} vertices! \n", chunk->mesh_size);
 #endif
-      glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
+      glDrawArrays(GL_TRIANGLES, 0, chunk->mesh_size);
       glBindVertexArray(0);
     }
     glUseProgram(0);
