@@ -1,11 +1,9 @@
 #ifndef SHADERS_HPP
 #define SHADERS_HPP
 
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
+#include "common.hpp"
 
 struct Attrib {
-  GLint shader;
   GLint position;
   GLint normal;
   GLint uv;
@@ -14,6 +12,19 @@ struct Attrib {
   GLint MVP;
 };
 
-GLuint load_shader(char const *vs_path, char const *fs_path);
+struct Shader {
+  GLuint id;
+  Attrib attr;
+};
+
+namespace shader_storage {
+
+shared_ptr<Shader> get_shader(string const& name);
+
+optional<shared_ptr<Shader>> load_shader(
+    string const& name, string const& vs_path, string const& fs_path,
+    function<void(Shader& shader)> init_attrs);
+
+}  // namespace shader_storage
 
 #endif

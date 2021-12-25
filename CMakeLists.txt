@@ -16,6 +16,8 @@ set(sources
   ${platform_sources}
   ${src}/main.cpp ${src}/util.cpp ${src}/shaders.cpp
   ${src}/world.cpp
+  ${src}/image.cpp
+  ${src}/texture.cpp
   third-party/SimplexNoise/src/SimplexNoise.cpp
   third-party/imgui/imgui.cpp
   third-party/imgui/imgui_draw.cpp

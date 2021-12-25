@@ -3,9 +3,13 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <fmt/core.h>
+#include <gperftools/heap-profiler.h>
+#include <gperftools/profiler.h>
+#include <gperftools/tcmalloc.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 
+#include <array>
 #include <fstream>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -18,16 +22,11 @@
 
 #include "PerlinNoise/PerlinNoise.hpp"
 #include "SimplexNoise/src/SimplexNoise.h"
-#include "shaders.hpp"
-#define STB_IMAGE_IMPLEMENTATION
-#include <gperftools/heap-profiler.h>
-#include <gperftools/profiler.h>
-#include <gperftools/tcmalloc.h>
-
 #include "imgui/backends/imgui_impl_glfw.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/imgui.h"
-#include "stb/stb_image.h"
+#include "shaders.hpp"
+#include "texture.hpp"
 #include "util.hpp"
 #include "world.hpp"
 
@@ -47,75 +46,40 @@ enum class Mode {
 };
 
 struct {
-  GLFWwindow *window;
+  // Main window state
+  GLFWwindow *window = nullptr;
   int width = WIDTH;
   int height = HEIGHT;
 
+  // Camera mouse state
   bool firstMouse = true;
-
   float yaw = -90.0f;
   float pitch = 0.0f;
   float sensitivity = 0.1f;
   float lastX = (float)WIDTH / 2.0f;
   float lastY = (float)HEIGHT / 2.0f;
-
   glm::vec3 camera_pos = glm::vec3(4.0, 50.0, 50.0);
   glm::vec3 camera_front = glm::vec3(0.0, 0.0, -1.0f);
-  float speed = 32.0f;
   glm::vec3 camera_up = glm::vec3(0.0, 0.1, 0.0);
-
-  WorldPos player_pos;
-
-  GLuint shader;
-
-  std::vector<Entity> entities;
-
-  float delta_time = 0.0f;  // Time between current frame and last frame
-  float last_frame = 0.0f;  // Time of last frame
-
-  World world;
-
   // TODO: Update on resize
   // TODO: Also need to change the clipping distance based on the chunk radius
   glm::mat4 Projection = glm::perspective(
       glm::radians(45.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 800.0f);
 
+  // Player state
+  float speed = 16.0f;
+  WorldPos player_pos;
+
+  // Other
+  float delta_time = 0.0f;  // Time between current frame and last frame
+  float last_frame = 0.0f;  // Time of last frame
+  World world;
   int rendering_distance = 4;
-
   Mode mode = Mode::Playing;
-
   GLuint chunk_vao = 0;
+
+  Texture minimap_tex;
 } state;
-
-struct Texture {
-  GLuint texture;
-};
-
-Texture load_texture(std::string const &path) {
-  int width, height, nrChannels;
-  unsigned char *data =
-      stbi_load(path.c_str(), &width, &height, &nrChannels, 0);
-
-  unsigned int texture;
-  glGenTextures(1, &texture);
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, texture);
-
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-  if (data) {
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
-                 GL_UNSIGNED_BYTE, data);
-    glGenerateMipmap(GL_TEXTURE_2D);
-  } else {
-    std::cout << "Failed to load texture" << std::endl;
-  }
-  stbi_image_free(data);
-  Texture res;
-  res.texture = texture;
-  return res;
-}
 
 inline glm::vec3 get_block_pos_looking_at() { return state.camera_front; }
 
@@ -231,50 +195,61 @@ void render_menu() {
 }
 
 void render_world() {
-  auto block_attrib = state.world.block_attrib;
   GLsizei stride = sizeof(GLfloat) * 10;
-  glUseProgram(block_attrib.shader);
-  for (auto &chunk : state.world.chunks) {
-    glBindVertexArray(state.chunk_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, chunk->buffer);
+  if (auto block_shader = shader_storage::get_shader("block")) {
+    glUseProgram(block_shader->id);
+    auto block_attrib = block_shader->attr;
+    for (auto &chunk : state.world.chunks) {
+      glBindVertexArray(state.chunk_vao);
+      glBindBuffer(GL_ARRAY_BUFFER, chunk->buffer);
 
-    // MV
-    glm::mat4 View =
-        glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
-                    state.camera_up);
-    glm::mat4 mvp = state.Projection * View;
-    glUniformMatrix4fv(block_attrib.MVP, 1, GL_FALSE, &mvp[0][0]);
+      // MV
+      glm::mat4 View =
+          glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
+                      state.camera_up);
+      glm::mat4 mvp = state.Projection * View;
+      glUniformMatrix4fv(block_attrib.MVP, 1, GL_FALSE, &mvp[0][0]);
 
-    glEnableVertexAttribArray(block_attrib.position);
-    glEnableVertexAttribArray(block_attrib.normal);
-    glEnableVertexAttribArray(block_attrib.uv);
-    glEnableVertexAttribArray(block_attrib.ao);
-    glEnableVertexAttribArray(block_attrib.light);
+      glEnableVertexAttribArray(block_attrib.position);
+      glEnableVertexAttribArray(block_attrib.normal);
+      glEnableVertexAttribArray(block_attrib.uv);
+      glEnableVertexAttribArray(block_attrib.ao);
+      glEnableVertexAttribArray(block_attrib.light);
 
-    glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE, stride,
-                          (void *)offsetof(VertexData, pos));
-    glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
-                          (void *)offsetof(VertexData, normal));
-    glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
-                          (void *)offsetof(VertexData, uv));
-    glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
-                          (void *)offsetof(VertexData, ao));
-    glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
-                          (void *)offsetof(VertexData, light));
+      glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE,
+                            stride, (void *)offsetof(VertexData, pos));
+      glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
+                            (void *)offsetof(VertexData, normal));
+      glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
+                            (void *)offsetof(VertexData, uv));
+      glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
+                            (void *)offsetof(VertexData, ao));
+      glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
+                            (void *)offsetof(VertexData, light));
 
-    // render the chunk mesh
-    // fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
-    glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
+      // render the chunk mesh
+      // fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
+      glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
 
-    glDisableVertexAttribArray(block_attrib.position);
-    glDisableVertexAttribArray(block_attrib.normal);
-    glDisableVertexAttribArray(block_attrib.uv);
-    glDisableVertexAttribArray(block_attrib.ao);
-    glDisableVertexAttribArray(block_attrib.light);
+      glDisableVertexAttribArray(block_attrib.position);
+      glDisableVertexAttribArray(block_attrib.normal);
+      glDisableVertexAttribArray(block_attrib.uv);
+      glDisableVertexAttribArray(block_attrib.ao);
+      glDisableVertexAttribArray(block_attrib.light);
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+      glBindVertexArray(0);
+    }
   }
+}
+
+void render_minimap() {
+  // if (auto shader = shader_storage::get_shader("minimap")) {
+  //   glBindTexture(GL_TEXTURE_2D, state.minimap_tex.texture);
+  //   glUseProgram(shader->id);
+  //   glDrawArrays(GL_TRIANGLES, 0, 6);
+  //   glUseProgram(0);
+  // }
 }
 
 void render() {
@@ -286,6 +261,7 @@ void render() {
     case Mode::Playing: {
       render_info_bar();
       render_world();
+      render_minimap();
     } break;
     case Mode::Menu: {
       render_menu();
@@ -309,15 +285,19 @@ void update() {
   state.player_pos =
       glm::ivec3{state.camera_pos.x, state.camera_pos.y, state.camera_pos.z};
 
+  // Calculate the minimap image
+  // calculate_minimap_tex(state.minimap_tex, state.world, state.player_pos,
+  //                       state.rendering_distance);
+
   if (state.mode == Mode::Playing) {
 #ifdef MEMORY_DEBUG
     HeapProfilerStart("output_inside.prof");
-#endif MEMORY_DEBUG
+#endif
     load_chunks_around_player(state.world, state.camera_pos,
                               state.rendering_distance);
 #ifdef MEMORY_DEBUG
     HeapProfilerStop();
-#endif MEMORY_DEBUG
+#endif
   }
 }
 
@@ -384,7 +364,7 @@ void init_graphics() {
   // Accept fragment if it closer to the camera than the former one
   glDepthFunc(GL_LESS);
 
-  // glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+  //  glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
   glfwSetCursorPosCallback(state.window, mouse_callback);
   glfwSetKeyCallback(state.window, key_callback);
 
@@ -409,24 +389,23 @@ void init_graphics() {
 int main() {
   init_graphics();
   setup_noise();
-  auto basic_shader =
-      load_shader("./shaders/basic_vs.glsl", "./shaders/basic_fs.glsl");
-  state.shader = basic_shader;
-  Texture texture = load_texture("images/texture.png");
+  auto basic_shader = shader_storage::load_shader(
+      "block", "./shaders/basic_vs.glsl", "./shaders/basic_fs.glsl",
+      [&](Shader &shader) -> void {
+        Attrib block_attrib;
+        block_attrib.position = glGetAttribLocation(shader.id, "position");
+        block_attrib.normal = glGetAttribLocation(shader.id, "normal");
+        block_attrib.uv = glGetAttribLocation(shader.id, "texUV");
+        block_attrib.ao = glGetAttribLocation(shader.id, "ao");
+        block_attrib.light = glGetAttribLocation(shader.id, "light");
+        block_attrib.MVP = glGetUniformLocation(shader.id, "MVP");
+        shader.attr = block_attrib;
+      });
+  auto texture = texture_storage::load_texture("block", "images/texture.png");
 
   // During init, enable debug output
   glEnable(GL_DEBUG_OUTPUT);
   glDebugMessageCallback(MessageCallback, 0);
-
-  Attrib block_attrib;
-  block_attrib.shader = basic_shader;
-  block_attrib.position = glGetAttribLocation(block_attrib.shader, "position");
-  block_attrib.normal = glGetAttribLocation(block_attrib.shader, "normal");
-  block_attrib.uv = glGetAttribLocation(block_attrib.shader, "texUV");
-  block_attrib.ao = glGetAttribLocation(block_attrib.shader, "ao");
-  block_attrib.light = glGetAttribLocation(block_attrib.shader, "light");
-  block_attrib.MVP = glGetUniformLocation(basic_shader, "MVP");
-  state.world.block_attrib = block_attrib;
 
   auto *window = state.window;
 

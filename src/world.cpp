@@ -6,24 +6,18 @@
 #include <glm/glm.hpp>
 
 #include "PerlinNoise/PerlinNoise.hpp"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb/stb_image.h"
-#include "stb/stb_image_write.h"
+#include "constants.hpp"
+#include "image.hpp"
+#include "util.hpp"
 
 using std::array;
+using std::byte;
 using std::max;
 using std::min;
 
 float BLOCK_WIDTH = 2.0f;
 float BLOCK_LENGTH = BLOCK_WIDTH;
 float BLOCK_HEIGHT = BLOCK_WIDTH;
-
-int round_to_nearest_16(int number) {
-  int result = abs(number) + 16 / 2;
-  result -= result % 16;
-  result *= number > 0 ? 1 : -1;
-  return result;
-}
 
 inline Chunk *is_chunk_loaded(World &world, int x, int y) {
   auto ch = world.loaded_chunks.find(chunk_id_from_coords(x, y));
@@ -316,8 +310,7 @@ void occlusion(char neighbors[27], char lights[27], float shades[27],
   }
 }
 
-void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk,
-                   Attrib block_attrib) {
+void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
   chunk.mesh = {};
 
   // fmt::print("Loading chunk at {}, {}\n", chunk_x, chunk_y);
@@ -456,11 +449,10 @@ inline bool can_place_at_block(BlockType type) {
 
 void load_chunks_around_player(World &world, WorldPos center_pos,
                                uint32_t radius) {
-  int center_x = center_pos.x;
-  int center_y = center_pos.z;
-
   world.chunks = {};
 
+  int center_x = center_pos.x;
+  int center_y = center_pos.z;
   int first_chunk_x = round_to_nearest_16(center_x) - (CHUNK_WIDTH * radius);
   int first_chunk_y = round_to_nearest_16(center_y) - (CHUNK_LENGTH * radius);
 
@@ -477,11 +469,11 @@ void load_chunks_around_player(World &world, WorldPos center_pos,
 
       if (!loaded) {
         loaded_ch = new Chunk();
-        load_chunk_at(world, chunk_x, chunk_y, *loaded_ch, world.block_attrib);
+        load_chunk_at(world, chunk_x, chunk_y, *loaded_ch);
         world.loaded_chunks.insert(
             {chunk_id_from_coords(chunk_x, chunk_y), loaded_ch});
       } else if (loaded_ch->is_dirty) {
-        load_chunk_at(world, chunk_x, chunk_y, *loaded_ch, world.block_attrib);
+        load_chunk_at(world, chunk_x, chunk_y, *loaded_ch);
       } else {
         // no need to regenerate
       }
@@ -516,28 +508,42 @@ glm::ivec3 biome_color(BiomeKind bk) {
   }
 }
 
-#define RGBA(__r, __g, __b, __a) (__r | (__g << 8) | (__b << 16) | (__a << 24));
-#define IMG_GET_PIXEL_AT(__texture, __h, __x, __y) \
-  (*(__texture + (__y * __h + __x)))
-#define RGBA_R(__pix) (__pix >> 0) & 0xFF
-#define RGBA_G(__pix) (__pix >> 8) & 0xFF
-#define RGBA_B(__pix) (__pix >> 16) & 0xFF
-#define RGBA_A(__pix) (__pix >> 24) & 0xFF
-#define RGBA_TO_IVEC(__pix) \
-  glm::ivec4(RGBA_R(__pix), RGBA_G(__pix), RGBA_B(__pix), RGBA_A(__pix))
-
 constexpr int NM_W = 1024;
 constexpr int NM_H = 1024;
 
-#include <bitset>
+Color block_kind_color(BlockType bt) {
+  if (auto atlas_image = image_storage::get_image("block")) {
+    auto offsetf = block_type_texture_offset(bt);
+    auto w = atlas_image->width;
+    auto h = atlas_image->height;
+    auto offset = glm::ivec2(offsetf.x * (float)w, offsetf.y * (float)h);
+    auto pix = (*atlas_image)(offset.x, offset.y);
+    return pix;
+  }
+  return MISSING_COLOR;
+}
 
-glm::ivec4 block_kind_color(unsigned char *texture, int w, int h,
-                            BlockType bt) {
-  auto offsetf = block_type_texture_offset(bt);
-  auto offset = glm::ivec2(offsetf.x * (float)w, offsetf.y * (float)h);
-  auto pix = IMG_GET_PIXEL_AT((unsigned int *)texture, h, offset.x, offset.y);
-  auto col = RGBA_TO_IVEC(pix);
-  return col;
+uint32_t get_col_height(Block *col) {
+  int topBlockHeight = CHUNK_HEIGHT - 1;
+  while (topBlockHeight > 0 && col[topBlockHeight].type == BlockType::Air) {
+    topBlockHeight--;
+  }
+  return topBlockHeight;
+}
+
+Block get_top_block_of_column(Chunk &chunk, int x, int y) {
+  auto col = &CHUNK_COL_AT(chunk, x, y);
+  auto topBlockHeight = get_col_height(col);
+  Block topBlock = col[topBlockHeight];
+  return topBlock;
+}
+
+void foreach_col_in_chunk(Chunk &chunk, std::function<void(int, int)> fun) {
+  for (int __x = 0; __x < CHUNK_WIDTH; ++__x) {
+    for (int __y = 0; __y < CHUNK_LENGTH; ++__y) {
+      fun(__x, __y);
+    }
+  }
 }
 
 void world_dump_heights(World &world) {
@@ -552,29 +558,22 @@ void world_dump_heights(World &world) {
   // biome noise map
   {
     fmt::print("Generating a biome noise map dump...\n");
-    auto *whm = new array<array<int, NM_W>, NM_H>();
-    auto *biome_kind_map = new array<array<int, NM_W>, NM_H>();
-    auto *world_height_map = new array<array<int, NM_W>, NM_H>();
-    auto *ortho_view = new array<array<int, NM_W>, NM_H>();
+    auto *whm = new array<array<Pixel, NM_W>, NM_H>();
+    auto *biome_kind_map = new array<array<Pixel, NM_W>, NM_H>();
+    auto *world_height_map = new array<array<Pixel, NM_W>, NM_H>();
+    auto *ortho_view = new array<array<Pixel, NM_W>, NM_H>();
     fmt::print("Calculating noise...\n");
     Block col[CHUNK_HEIGHT];
     for (int x = 0; x < NM_W; ++x) {
       for (int y = 0; y < NM_H; ++y) {
         gen_column_at(world, col, x, y);
-
-        // get the top block
-        int topBlockHeight = CHUNK_HEIGHT - 1;
-        while (topBlockHeight > 0 &&
-               col[topBlockHeight].type == BlockType::Air) {
-          topBlockHeight--;
-        }
-        Block topBlock = col[topBlockHeight];
+        uint32_t height = get_col_height(col);
+        Block topBlock = col[height];
 
         // full map ortho view
         {
-          auto c = block_kind_color(texture, width, height, topBlock.type);
-          unsigned int color = RGBA(c.r, c.g, c.b, c.a);
-          (*ortho_view)[x][y] = color;
+          auto c = block_kind_color(topBlock.type);
+          (*ortho_view)[x][y] = c;
         }
 
         auto biome_noise = biome_noise_at(world, x, y);
@@ -585,8 +584,7 @@ void world_dump_heights(World &world) {
           int g = noise_value;
           int b = noise_value;
           int a = 255;
-          unsigned int color = RGBA(r, g, b, a);
-          (*whm)[x][y] = color;
+          (*whm)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
         }
 
         auto kind = biome_noise_to_kind_at_point(biome_noise);
@@ -599,8 +597,8 @@ void world_dump_heights(World &world) {
           int g = bk_color.g;
           int b = bk_color.b;
           int a = 255;
-          unsigned int color = RGBA(r, g, b, a);
-          (*biome_kind_map)[x][y] = color;
+          (*biome_kind_map)[x][y] =
+              rgba_color(byte(r), byte(g), byte(b), byte(a));
         }
 
         // heightmap
@@ -611,8 +609,8 @@ void world_dump_heights(World &world) {
           int g = noise_value;
           int b = noise_value;
           int a = 255;
-          unsigned int color = RGBA(r, g, b, a);
-          (*world_height_map)[x][y] = color;
+          (*world_height_map)[x][y] =
+              rgba_color(byte(r), byte(g), byte(b), byte(a));
         }
       }
     }
@@ -639,4 +637,41 @@ inline Biome biome_at_point(World &world, WorldPos pos) {
 const char *get_biome_name_at(World &world, WorldPos pos) {
   const auto &biome = biome_at_point(world, pos);
   return biome.name;
+}
+
+// Calculate a PNG image representing the orthogonal view of the
+// currently loaded world chunks around the player
+Image *calculate_minimap_image(World &world, WorldPos pos, u32 radius) {
+  auto center_pos = pos;
+  int center_x = center_pos.x;
+  int center_y = center_pos.z;
+  int first_chunk_x = round_to_nearest_16(center_x) - (CHUNK_WIDTH * radius);
+  int first_chunk_y = round_to_nearest_16(center_y) - (CHUNK_LENGTH * radius);
+  int width = CHUNK_WIDTH * radius;
+  int height = CHUNK_LENGTH * radius;
+  auto *image = new Image(width, height);
+  for (auto *chunk : world.chunks) {
+    int texture_pos_x = chunk->x - first_chunk_x;
+    int texture_pos_y = chunk->y - first_chunk_y;
+    foreach_col_in_chunk(*chunk, [&](int x, int y) -> void {
+      auto topBlock = get_top_block_of_column(*chunk, x, y);
+      auto c = block_kind_color(topBlock.type);
+      auto image_x = texture_pos_x + x;
+      auto image_y = texture_pos_y + y;
+      image->set(image_x, image_y, c);
+    });
+  }
+  return image;
+}
+
+void calculate_minimap_tex(Texture &texture, World &world, WorldPos pos,
+                           u32 radius) {
+  auto *img = calculate_minimap_image(world, pos, radius);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, texture.texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img->width, img->height, 0, GL_RGBA,
+               GL_UNSIGNED_BYTE, img->data);
+  glGenerateMipmap(GL_TEXTURE_2D);
 }

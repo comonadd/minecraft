@@ -10,6 +10,7 @@
 #include "PerlinNoise/PerlinNoise.hpp"
 #include "SimplexNoise/src/SimplexNoise.h"
 #include "shaders.hpp"
+#include "texture.hpp"
 
 using WorldPos = glm::ivec3;
 
@@ -85,7 +86,6 @@ struct World {
   std::vector<Chunk*> chunks{};
   std::unordered_map<ChunkId, Chunk*> loaded_chunks;
 
-  Attrib block_attrib;
   siv::PerlinNoise perlin;
   SimplexNoise simplex{0.1f, 1.0f, 2.0f, 0.5f};
 
@@ -150,5 +150,10 @@ Block chunk_get_block_at_global(Chunk* chunk, WorldPos pos);
 void world_dump_heights(World& world);
 
 const char* get_biome_name_at(World& world, WorldPos pos);
+
+void foreach_col_in_chunk(Chunk& chunk, std::function<void(int, int)> fun);
+
+void calculate_minimap_tex(Texture& texture, World& world, WorldPos pos,
+                           u32 radius);
 
 #endif
