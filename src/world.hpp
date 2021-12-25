@@ -58,12 +58,19 @@ struct Chunk {
   GLuint vao = 0;
 };
 
-using ChunkId = long;
+// A hash function used to hash a pair of any kind
+using std::hash;
+struct hash_pair {
+  template <class T1, class T2>
+  size_t operator()(const pair<T1, T2>& p) const {
+    auto hash1 = hash<T1>{}(p.first);
+    auto hash2 = hash<T2>{}(p.second);
+    return hash1 ^ hash2;
+  }
+};
 
-// Uses Cantor pairing function for mapping two integers to one
-inline ChunkId chunk_id_from_coords(int x, int y) {
-  return ((x + y) * (x + y + 1) / 2) + y;
-}
+using ChunkId = pair<int, int>;
+inline ChunkId chunk_id_from_coords(int x, int y) { return make_pair(x, y); }
 
 enum BiomeKind {
   Grassland = 0,
@@ -85,7 +92,7 @@ const int WATER_LEVEL = 30;
 struct World {
   int seed = 3849534;
   std::vector<Chunk*> chunks{};
-  std::unordered_map<ChunkId, Chunk*> loaded_chunks;
+  std::unordered_map<ChunkId, Chunk*, hash_pair> loaded_chunks;
 
   siv::PerlinNoise perlin;
   SimplexNoise simplex{0.1f, 1.0f, 2.0f, 0.5f};
