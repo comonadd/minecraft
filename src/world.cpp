@@ -392,22 +392,47 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
   }
 
   // Only allocate a new buffer if none was allocated before
-  if (chunk.buffer == 0) {
+  auto shader = shader_storage::get_shader("block");
+  auto block_attrib = shader->attr;
+  if (chunk.vao == 0) {
+    // Configure the VAO
+    glGenVertexArrays(1, &chunk.vao);
     glGenBuffers(1, &chunk.buffer);
   }
+  glBindVertexArray(chunk.vao);
 
+  // Update chunk buffer mesh data
   glBindBuffer(GL_ARRAY_BUFFER, chunk.buffer);
-
-  // we've regenerated the chunk mesh
-  chunk.is_dirty = false;
-
   // so update the chunk buffer
   auto mesh_size = sizeof(chunk.mesh[0]) * chunk.mesh.size();
   auto *meshp = &chunk.mesh[0];
-
   glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);
 
+  // Update VAO settings
+  GLsizei stride = sizeof(GLfloat) * 10;
+  glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE, stride,
+                        (void *)offsetof(VertexData, pos));
+  glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
+                        (void *)offsetof(VertexData, normal));
+  glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
+                        (void *)offsetof(VertexData, uv));
+  glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
+                        (void *)offsetof(VertexData, ao));
+  glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
+                        (void *)offsetof(VertexData, light));
+  glEnableVertexAttribArray(block_attrib.position);
+  glEnableVertexAttribArray(block_attrib.normal);
+  glEnableVertexAttribArray(block_attrib.uv);
+  glEnableVertexAttribArray(block_attrib.ao);
+  glEnableVertexAttribArray(block_attrib.light);
+
   glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+  glBindVertexArray(0);
+  glDeleteBuffers(1, &chunk.buffer);
+
+  // we've regenerated the chunk mesh
+  chunk.is_dirty = false;
 }
 
 void chunk_modify_block_at_global(Chunk *chunk, WorldPos pos, BlockType type) {

@@ -76,7 +76,6 @@ struct {
   World world;
   int rendering_distance = 4;
   Mode mode = Mode::Playing;
-  GLuint chunk_vao = 0;
 
   Texture minimap_tex;
 } state;
@@ -195,51 +194,25 @@ void render_menu() {
 }
 
 void render_world() {
-  GLsizei stride = sizeof(GLfloat) * 10;
   if (auto block_shader = shader_storage::get_shader("block")) {
     glUseProgram(block_shader->id);
     auto block_attrib = block_shader->attr;
+    // MV
+    glm::mat4 View =
+        glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
+                    state.camera_up);
+    glm::mat4 mvp = state.Projection * View;
+    glUniformMatrix4fv(block_attrib.MVP, 1, GL_FALSE, &mvp[0][0]);
     for (auto &chunk : state.world.chunks) {
-      glBindVertexArray(state.chunk_vao);
-      glBindBuffer(GL_ARRAY_BUFFER, chunk->buffer);
-
-      // MV
-      glm::mat4 View =
-          glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
-                      state.camera_up);
-      glm::mat4 mvp = state.Projection * View;
-      glUniformMatrix4fv(block_attrib.MVP, 1, GL_FALSE, &mvp[0][0]);
-
-      glEnableVertexAttribArray(block_attrib.position);
-      glEnableVertexAttribArray(block_attrib.normal);
-      glEnableVertexAttribArray(block_attrib.uv);
-      glEnableVertexAttribArray(block_attrib.ao);
-      glEnableVertexAttribArray(block_attrib.light);
-
-      glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE,
-                            stride, (void *)offsetof(VertexData, pos));
-      glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
-                            (void *)offsetof(VertexData, normal));
-      glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
-                            (void *)offsetof(VertexData, uv));
-      glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
-                            (void *)offsetof(VertexData, ao));
-      glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
-                            (void *)offsetof(VertexData, light));
-
+      glBindVertexArray(chunk->vao);
       // render the chunk mesh
-      // fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
+#ifdef DEBUG_RENDER
+      fmt::print("Rendering {} vertices! \n", chunk->mesh.size());
+#endif
       glDrawArrays(GL_TRIANGLES, 0, chunk->mesh.size());
-
-      glDisableVertexAttribArray(block_attrib.position);
-      glDisableVertexAttribArray(block_attrib.normal);
-      glDisableVertexAttribArray(block_attrib.uv);
-      glDisableVertexAttribArray(block_attrib.ao);
-      glDisableVertexAttribArray(block_attrib.light);
-
-      glBindBuffer(GL_ARRAY_BUFFER, 0);
       glBindVertexArray(0);
     }
+    glUseProgram(0);
   }
 }
 
@@ -321,8 +294,7 @@ void reset_chunks() {
   for (auto &p : state.world.loaded_chunks) {
     // deallocate buffers
     auto &chunk = p.second;
-    // glDeleteVertexArrays(1, &chunk->VAO);
-    glDeleteBuffers(1, &chunk->buffer);
+    glDeleteVertexArrays(1, &chunk->vao);
     delete chunk;
   }
   state.world.chunks.clear();
@@ -381,9 +353,6 @@ void init_graphics() {
   // Setup Platform/Renderer backends
   ImGui_ImplGlfw_InitForOpenGL(state.window, true);
   ImGui_ImplOpenGL3_Init(glsl_version);
-
-  // Chunk VAO
-  glGenVertexArrays(1, &state.chunk_vao);
 }
 
 int main() {

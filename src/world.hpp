@@ -53,8 +53,9 @@ struct Chunk {
   // this flag is set to true if any of the blocks in the chunk has been changed
   bool is_dirty = false;
 
-  // array buffer
+  // GL buffers
   GLuint buffer = 0;
+  GLuint vao = 0;
 };
 
 using ChunkId = long;
