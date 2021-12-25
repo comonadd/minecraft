@@ -27,6 +27,10 @@ set(sources
   third-party/imgui/backends/imgui_impl_glfw.cpp
 )
 
+if (DISABLE_CURSOR STREQUAL "1")
+    add_definitions(-DDISABLE_CURSOR)
+endif ()
+
 set(CMAKE_CXX_STANDARD 20)
 add_compile_options(-Wall)
 

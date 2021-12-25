@@ -177,4 +177,8 @@ void foreach_col_in_chunk(Chunk& chunk, std::function<void(int, int)> fun);
 void calculate_minimap_tex(Texture& texture, World& world, WorldPos pos,
                            u32 radius);
 
+void unload_chunk(Chunk* chunk);
+
+void unload_distant_chunks(World& world, WorldPos pos, u32 rendering_distance);
+
 #endif

@@ -398,6 +398,9 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
     // Configure the VAO
     glGenVertexArrays(1, &chunk.vao);
     glGenBuffers(1, &chunk.buffer);
+#ifdef VAO_ALLOCATION
+    fmt::print("Allocating VAO={}\n", chunk.vao);
+#endif
   }
   glBindVertexArray(chunk.vao);
 
@@ -436,6 +439,56 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
   chunk.is_dirty = false;
 
   delete mesh;
+}
+
+void unload_chunk(Chunk *chunk) {
+  fmt::print("Unloading chunk at {}, {}\n", chunk->x, chunk->y);
+#ifdef VAO_ALLOCATION
+  fmt::print("Deallocating VAO={}\n", chunk->vao);
+#endif
+  glDeleteVertexArrays(1, &chunk->vao);
+}
+
+// distance from one chunk to another, in chunks
+// u32 distance_between_chunks(Chunk& a, Chunk& b) {
+//     return 0;
+// }
+//
+// u32 distance_to_chunk(Chunk& chunk, WorldPos pos) {
+//     auto& curr_player_chunk = world.player;
+// }
+
+inline u32 distance_to_chunk(WorldPos pos, Chunk* chunk) {
+  return (pos.x - chunk->x) * (pos.x - chunk->x) +
+         (pos.y - chunk->y) * (pos.y - chunk->y);
+}
+
+void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
+  int center_x = center_pos.x;
+  int center_y = center_pos.z;
+
+  for (auto it = world.loaded_chunks.begin(); it != world.loaded_chunks.end(); ) {
+    auto chunk_key = it->first;
+    auto chunkp = it->second;
+
+    if (chunkp == nullptr) {
+      it = world.loaded_chunks.erase(it);
+      continue;
+    }
+
+    int first_chunk_x = round_to_nearest_16(center_x) - (CHUNK_WIDTH * radius);
+    int first_chunk_y = round_to_nearest_16(center_y) - (CHUNK_LENGTH * radius);
+    int last_chunk_x = first_chunk_x + CHUNK_WIDTH * radius * 2;
+    int last_chunk_y = first_chunk_y + CHUNK_LENGTH * radius * 2;
+    bool in_radius = chunkp->x >= first_chunk_x && chunkp->x <= last_chunk_x && chunkp->y >= first_chunk_y && chunkp->y <= last_chunk_y;
+
+    if (!in_radius) {
+      unload_chunk(chunkp);
+      it = world.loaded_chunks.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 void chunk_modify_block_at_global(Chunk *chunk, WorldPos pos, BlockType type) {

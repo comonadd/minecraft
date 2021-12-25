@@ -74,7 +74,7 @@ struct {
   float delta_time = 0.0f;  // Time between current frame and last frame
   float last_frame = 0.0f;  // Time of last frame
   World world;
-  int rendering_distance = 4;
+  int rendering_distance = 8;
   Mode mode = Mode::Playing;
 
   Texture minimap_tex;
@@ -270,6 +270,8 @@ void update() {
 #endif
     load_chunks_around_player(state.world, state.camera_pos,
                               state.rendering_distance);
+    unload_distant_chunks(state.world, state.player_pos,
+                          state.rendering_distance);
 #ifdef MEMORY_DEBUG
     HeapProfilerStop();
 #endif
@@ -296,7 +298,7 @@ void reset_chunks() {
   for (auto &p : state.world.loaded_chunks) {
     // deallocate buffers
     auto &chunk = p.second;
-    glDeleteVertexArrays(1, &chunk->vao);
+    unload_chunk(chunk);
     delete chunk;
   }
   state.world.chunks.clear();
@@ -338,7 +340,9 @@ void init_graphics() {
   // Accept fragment if it closer to the camera than the former one
   glDepthFunc(GL_LESS);
 
-  //  glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+#ifdef DISABLE_CURSOR
+  glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+#endif
   glfwSetCursorPosCallback(state.window, mouse_callback);
   glfwSetKeyCallback(state.window, key_callback);
 
