@@ -9,7 +9,9 @@ struct Attrib {
   GLint uv;
   GLint ao;
   GLint light;
+
   GLint MVP;
+  GLint light_pos;
 };
 
 struct Shader {

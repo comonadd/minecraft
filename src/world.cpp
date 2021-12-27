@@ -413,22 +413,22 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
   glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);
 
   // Update VAO settings
-  GLsizei stride = sizeof(GLfloat) * 10;
+  GLsizei stride = sizeof(VertexData);
   glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE, stride,
                         (void *)offsetof(VertexData, pos));
   glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
                         (void *)offsetof(VertexData, normal));
   glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
                         (void *)offsetof(VertexData, uv));
-  glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
-                        (void *)offsetof(VertexData, ao));
-  glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
-                        (void *)offsetof(VertexData, light));
+  // glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
+  //                       (void *)offsetof(VertexData, ao));
+  // glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
+  //                       (void *)offsetof(VertexData, light));
   glEnableVertexAttribArray(block_attrib.position);
   glEnableVertexAttribArray(block_attrib.normal);
   glEnableVertexAttribArray(block_attrib.uv);
-  glEnableVertexAttribArray(block_attrib.ao);
-  glEnableVertexAttribArray(block_attrib.light);
+  // glEnableVertexAttribArray(block_attrib.ao);
+  // glEnableVertexAttribArray(block_attrib.light);
 
   glBindBuffer(GL_ARRAY_BUFFER, 0);
 
@@ -458,7 +458,7 @@ void unload_chunk(Chunk *chunk) {
 //     auto& curr_player_chunk = world.player;
 // }
 
-inline u32 distance_to_chunk(WorldPos pos, Chunk* chunk) {
+inline u32 distance_to_chunk(WorldPos pos, Chunk *chunk) {
   return (pos.x - chunk->x) * (pos.x - chunk->x) +
          (pos.y - chunk->y) * (pos.y - chunk->y);
 }
@@ -467,7 +467,8 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
   int center_x = center_pos.x;
   int center_y = center_pos.z;
 
-  for (auto it = world.loaded_chunks.begin(); it != world.loaded_chunks.end(); ) {
+  for (auto it = world.loaded_chunks.begin();
+       it != world.loaded_chunks.end();) {
     auto chunk_key = it->first;
     auto chunkp = it->second;
 
@@ -480,7 +481,8 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
     int first_chunk_y = round_to_nearest_16(center_y) - (CHUNK_LENGTH * radius);
     int last_chunk_x = first_chunk_x + CHUNK_WIDTH * radius * 2;
     int last_chunk_y = first_chunk_y + CHUNK_LENGTH * radius * 2;
-    bool in_radius = chunkp->x >= first_chunk_x && chunkp->x <= last_chunk_x && chunkp->y >= first_chunk_y && chunkp->y <= last_chunk_y;
+    bool in_radius = chunkp->x >= first_chunk_x && chunkp->x <= last_chunk_x &&
+                     chunkp->y >= first_chunk_y && chunkp->y <= last_chunk_y;
 
     if (!in_radius) {
       unload_chunk(chunkp);

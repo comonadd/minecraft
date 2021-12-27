@@ -2,6 +2,7 @@
 
 #include <iostream>
 
+#include "logger.hpp"
 #include "util.hpp"
 
 struct {
@@ -42,7 +43,12 @@ optional<GLuint> _load_shader(char const* vs_path, char const* fs_path) {
 }
 
 shared_ptr<Shader> shader_storage::get_shader(string const& name) {
-  return state.loaded.at(name);
+  auto res = state.loaded.find(name);
+  if (res == state.loaded.end()) {
+    logger::error(fmt::format("Failed to load shader \"{}\"\n", name));
+    return {};
+  }
+  return res->second;
 }
 
 optional<shared_ptr<Shader>> shader_storage::load_shader(
@@ -55,6 +61,9 @@ optional<shared_ptr<Shader>> shader_storage::load_shader(
     auto res = make_shared<Shader>(shader);
     state.loaded.insert({name, res});
     return res;
+  } else {
+    logger::error(fmt::format("Failed to load shader \"{}\" at {}, {}", name,
+                              vs_path, fs_path));
+    return {};
   }
-  return {};
 }

@@ -102,6 +102,11 @@ struct Biome {
 
 const int WATER_LEVEL = 30;
 
+const int TICKS_PER_SECOND = 100;
+// in ticks (12 minutes)
+// const int DAY_DURATION = TICKS_PER_SECOND * 60 * 12;
+const int DAY_DURATION = TICKS_PER_SECOND * 10;
+
 struct World {
   int seed = 3849534;
   std::vector<Chunk*> chunks{};
@@ -112,6 +117,12 @@ struct World {
 
   SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
   SimplexNoise biome_noise{0.0005f, 1.0f, 2.0f, 0.5f};
+
+  glm::vec4 sun_pos{0.0f, 100.0f, 0.0f, 0.0f};
+  // ticks passed since the beginning of the world
+  u64 time = 0;
+  // time of day [0..DAY_DURATION];
+  u32 time_of_day = 0;
 
   std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
       // Desert

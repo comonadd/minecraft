@@ -1,7 +1,7 @@
 #ifndef UTIL_HPP
 #define UTIL_HPP
-#include <string>
-#include <vector>
+
+#include "common.hpp"
 
 std::string read_whole_file(char const* fp);
 
@@ -33,5 +33,8 @@ class Vector2D : public std::vector<T> {
     this->resize(new_width * new_height);
   }
 };
+
+template <typename T>
+vector<T> make_rect_mesh();
 
 #endif
