@@ -30,8 +30,8 @@
 #include "util.hpp"
 #include "world.hpp"
 
-const int WIDTH = 1600;
-const int HEIGHT = 960;
+const int WIDTH = 1920;
+const int HEIGHT = 1080;
 
 struct Entity {
   GLuint vbo;
@@ -47,8 +47,14 @@ enum class Mode {
 
 struct SkyVertexData {
   glm::vec3 pos;
+  glm::vec3 col;
   glm::vec2 uv;
 };
+
+inline glm::vec3 no_color() {
+  //
+  return {1.0f, 0.0f, 1.0f};
+}
 
 vector<SkyVertexData> make_skybox_mesh() {
   static const float positions[6][4][3] = {
@@ -73,10 +79,43 @@ vector<SkyVertexData> make_skybox_mesh() {
       p.pos.x = positions[i][j][0];
       p.pos.y = positions[i][j][1];
       p.pos.z = positions[i][j][2];
+      p.col = glm::vec3(0.0f, 0.629f, 1.0f);
       p.uv.x = uvs[i][j][0];
       p.uv.y = uvs[i][j][1];
       res.push_back(p);
     }
+  }
+  return res;
+}
+
+vector<SkyVertexData> make_rect_mesh() {
+  static const float positions[6][4][3] = {
+      {{-1, -1, -1}, {-1, -1, +1}, {-1, +1, -1}, {-1, +1, +1}},
+      {{+1, -1, -1}, {+1, -1, +1}, {+1, +1, -1}, {+1, +1, +1}},
+      {{-1, +1, -1}, {-1, +1, +1}, {+1, +1, -1}, {+1, +1, +1}},
+      {{-1, -1, -1}, {-1, -1, +1}, {+1, -1, -1}, {+1, -1, +1}},
+      {{-1, -1, -1}, {-1, +1, -1}, {+1, -1, -1}, {+1, +1, -1}},
+      {{-1, -1, +1}, {-1, +1, +1}, {+1, -1, +1}, {+1, +1, +1}}};
+  static const float uvs[6][4][2] = {
+      {{0, 0}, {1, 0}, {0, 1}, {1, 1}}, {{1, 0}, {0, 0}, {1, 1}, {0, 1}},
+      {{0, 1}, {0, 0}, {1, 1}, {1, 0}}, {{0, 0}, {0, 1}, {1, 0}, {1, 1}},
+      {{0, 0}, {0, 1}, {1, 0}, {1, 1}}, {{1, 0}, {1, 1}, {0, 0}, {0, 1}}};
+  static const float indices[6][6] = {{0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3},
+                                      {0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3},
+                                      {0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3}};
+  vector<SkyVertexData> res;
+  for (int v = 0; v < 6; ++v) {
+    int i = 0;
+    SkyVertexData p;
+    int j = indices[i][v];
+    p.pos.x = positions[i][j][0];
+    p.pos.y = positions[i][j][1];
+    p.pos.z = positions[i][j][2];
+    // p.col = glm::vec3(1.0f, 0.670f, 0.0f);
+    p.col = no_color();
+    p.uv.x = uvs[i][j][0];
+    p.uv.y = uvs[i][j][1];
+    res.push_back(p);
   }
   return res;
 }
@@ -118,6 +157,13 @@ struct {
   GLuint sky_vao;
   GLuint sky_buffer;
   vector<SkyVertexData> sky_mesh = make_skybox_mesh();
+
+  GLuint celestial_buffer;
+  GLuint celestial_vao;
+  vector<SkyVertexData> celestial_mesh = make_rect_mesh();
+
+  // sun/moon size
+  float celestial_size = 2.5f;
 } state;
 
 inline glm::vec3 get_block_pos_looking_at() { return state.camera_front; }
@@ -225,8 +271,13 @@ void render_info_bar() {
     total_vertices += chunk->mesh_size;
   }
   ImGui::Text("Vertices to render: %i", total_vertices);
-  ImGui::Text("World time: %i", state.world.time);
-  ImGui::Text("Time of day: %i", state.world.time_of_day);
+  ImGui::Text("World time: %lu", state.world.time);
+  ImGui::Text("Time of day (ticks): %i", state.world.time_of_day);
+  int hours = floor((float)state.world.time_of_day / (float)ONE_HOUR);
+  int minutes =
+      round((float)state.world.time_of_day - (float)hours * (float)ONE_HOUR) /
+      ONE_MINUTE;
+  ImGui::Text("Time of day: %i:%i", hours, minutes);
   ImGui::Text("Sun position: %f, %f, %f", state.world.sun_pos.x,
               state.world.sun_pos.y, state.world.sun_pos.z);
   ImGui::End();
@@ -277,33 +328,111 @@ void render_minimap() {
   // }
 }
 
+float map(float minRange, float maxRange, float minDomain, float maxDomain,
+          float value) {
+  return minDomain +
+         (maxDomain - minDomain) * (value - minRange) / (maxRange - minRange);
+}
+
 void render_sky() {
   if (auto shader = shader_storage::get_shader("sky")) {
-    if (auto sky_tex = texture_storage::get_texture("sky")) {
-      glDepthMask(GL_FALSE);
-      glUseProgram(shader->id);
-      auto attr = shader->attr;
-      // MV
-      glm::mat4 View =
-          glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
-                      state.camera_up);
-      glm::mat4 model = glm::mat4(1);
-      model = glm::translate(model, state.camera_pos);
-      model = glm::scale(model, glm::vec3(10.0f, 10.0f, 10.0f));
-      glm::mat4 mvp = state.Projection * View * model;
-      glUniformMatrix4fv(attr.MVP, 1, GL_FALSE, &mvp[0][0]);
-      glBindVertexArray(state.sky_vao);
-      glBindBuffer(GL_ARRAY_BUFFER, state.sky_buffer);
-      const auto tex = sky_tex->get();
-      glActiveTexture(GL_TEXTURE0);
-      glBindTexture(GL_TEXTURE_2D, tex->texture);
-      // render the chunk mesh
-      glDrawArrays(GL_TRIANGLES, 0, state.sky_mesh.size());
-      glBindBuffer(GL_ARRAY_BUFFER, 0);
-      glBindVertexArray(0);
-      glUseProgram(0);
-      glDepthMask(GL_TRUE);
+    auto sky_tex = texture_storage::get_texture("sky");
+    glDepthMask(GL_FALSE);
+    glUseProgram(shader->id);
+    auto attr = shader->attr;
+    // MV
+    glm::mat4 View =
+        glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
+                    state.camera_up);
+    glm::mat4 model = glm::mat4(1);
+    model = glm::translate(model, state.camera_pos);
+    model = glm::scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
+    glm::mat4 mvp = state.Projection * View * model;
+    glUniformMatrix4fv(attr.MVP, 1, GL_FALSE, &mvp[0][0]);
+
+    float tdf = (float)state.world.time_of_day;
+    float blend_factor = 0;
+    float NIGHT_START_BF = 0.0f;
+    float MORNING_START_BF = 0.25f;
+    float DAY_START_BF = 1.0f;
+    float EVENING_START_BF = 0.6f;
+    // float total_day_passed =
+    //     (float)state.world.time_of_day / (float)DAY_DURATION;
+    if (tdf >= 0 && tdf < MORNING) {
+      // night
+      // float night_passed = (float)state.world.time_of_day / (float)MORNING;
+      blend_factor = map(0.0f, MORNING, 0.0f, MORNING_START_BF, tdf);
+    } else if (tdf > MORNING && tdf < DAY) {
+      // morning
+      // float morning_passed = (float)state.world.time_of_day / (float)DAY;
+      // blend_factor = MORNING_START_BF + (DAY_START_BF * morning_passed *
+      //                                    (1.0f - MORNING_START_BF));
+      blend_factor = map(MORNING, DAY, MORNING_START_BF, DAY_START_BF, tdf);
+    } else if (tdf < EVENING) {
+      // day
+      // float day_passed = (float)state.world.time_of_day / (float)EVENING;
+      // blend_factor = DAY_START_BF + (1.0f / day_passed);
+      blend_factor = map(DAY, EVENING, DAY_START_BF, EVENING_START_BF, tdf);
+    } else if (tdf < NIGHT) {
+      // evening
+      // float ev_passed = (float)state.world.time_of_day / (float)NIGHT;
+      // blend_factor = ev_passed * 0.8f;
+      blend_factor = map(EVENING, NIGHT, EVENING_START_BF, NIGHT_START_BF, tdf);
+    } else {
     }
+
+    glUniform1f(attr.blend_factor, blend_factor);
+    glBindVertexArray(state.sky_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, state.sky_buffer);
+    const auto tex = sky_tex->get();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex->texture);
+    // render the chunk mesh
+    glDrawArrays(GL_TRIANGLES, 0, state.sky_mesh.size());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glDepthMask(GL_TRUE);
+  }
+}
+
+void render_celestial() {
+  if (auto shader = shader_storage::get_shader("celestial")) {
+    auto sky_tex = state.world.is_day ? texture_storage::get_texture("sun")
+                                      : texture_storage::get_texture("moon");
+    glDepthMask(GL_FALSE);
+    glUseProgram(shader->id);
+    auto attr = shader->attr;
+    // MV
+    glm::mat4 View =
+        glm::lookAt(state.world.origin, state.world.origin + state.camera_front,
+                    state.camera_up);
+    glm::mat4 model = glm::mat4(1);
+    model = glm::translate(model, glm::vec3(state.world.sun_pos));
+    auto s = state.world.celestial_size;
+    model = glm::scale(model, glm::vec3(s, s, s));
+    auto VM = View * model;
+
+    // always face the player
+    auto size = state.celestial_size;
+    VM[0][0] = VM[1][1] = VM[2][2] = size;
+    VM[0][1] = VM[0][2] = VM[1][2] = 0.0f;
+    VM[1][0] = VM[2][0] = VM[2][1] = 0.0f;
+    VM = glm::rotate(VM, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+    glm::mat4 mvp = state.Projection * VM;
+    glUniformMatrix4fv(attr.MVP, 1, GL_FALSE, &mvp[0][0]);
+    glBindVertexArray(state.celestial_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, state.celestial_buffer);
+    const auto tex = sky_tex->get();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex->texture);
+    // render the chunk mesh
+    glDrawArrays(GL_TRIANGLES, 0, state.celestial_mesh.size());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glDepthMask(GL_TRUE);
   }
 }
 
@@ -314,8 +443,9 @@ void render() {
 
   switch (state.mode) {
     case Mode::Playing: {
-      // render_info_bar();
+      render_info_bar();
       render_sky();
+      render_celestial();
       render_world();
       // render_minimap();
     } break;
@@ -339,21 +469,16 @@ void update() {
   // update time
   int ticks_passed = state.delta_time * TICKS_PER_SECOND;
   state.world.time += ticks_passed;
-
   if (state.world.time_of_day >= DAY_DURATION) {
     state.world.time_of_day = 0;
   } else {
     state.world.time_of_day += ticks_passed;
   }
+  state.world.is_day = state.world.time_of_day < (DAY_DURATION / 2);
 
-  static float __prev_d = 0;
-
-  // calculate sun position
+  // calculate celestial bdy position
   float sun_degrees =
-      360.0f * ((float)state.world.time_of_day / (float)DAY_DURATION);
-  // fmt::print("Sun degrees: {}\n", sun_degrees);
-  // fmt::print("Sun degrees delta: {}\n", sun_degrees - __prev_d);
-  __prev_d = sun_degrees;
+      720.0f * ((float)state.world.time_of_day / (float)DAY_DURATION);
   glm::mat4 model = glm::mat4(1.0f);
   model = glm::rotate(model, glm::radians(sun_degrees),
                       glm::vec3(0.0f, 0.0f, 1.0f));
@@ -484,31 +609,81 @@ int main() {
   texture_storage::load_texture("block", "images/texture.png");
 
   texture_storage::load_texture("sky", "images/sky.png");
+  texture_storage::load_texture("sun", "images/sun.png");
+  texture_storage::load_texture("moon", "images/moon.png");
+
   shader_storage::load_shader(
       "sky", "./shaders/sky_vs.glsl", "./shaders/sky_fs.glsl",
       [&](Shader &shader) -> void {
         Attrib attr;
         attr.position = glGetAttribLocation(shader.id, "position");
-        attr.MVP = glGetUniformLocation(shader.id, "mvp");
+        attr.color = glGetAttribLocation(shader.id, "color");
         attr.uv = glGetAttribLocation(shader.id, "texUV");
+        attr.MVP = glGetUniformLocation(shader.id, "mvp");
+        attr.blend_factor = glGetUniformLocation(shader.id, "blendFactor");
         shader.attr = attr;
         auto psize = sizeof(state.sky_mesh[0]);
         auto stride = psize;
-        glGenVertexArrays(1, &state.sky_vao);
-        glGenBuffers(1, &state.sky_buffer);
-        glBindVertexArray(state.sky_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, state.sky_buffer);
-        auto s = psize * state.sky_mesh.size();
-        glBufferData(GL_ARRAY_BUFFER, s, state.sky_mesh.data(), GL_STATIC_DRAW);
-        glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
-                              (void *)offsetof(SkyVertexData, pos));
-        glVertexAttribPointer(attr.uv, 2, GL_FLOAT, GL_FALSE, stride,
-                              (void *)offsetof(SkyVertexData, uv));
-        glEnableVertexAttribArray(attr.position);
-        glEnableVertexAttribArray(attr.uv);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
-        glDeleteBuffers(1, &state.sky_buffer);
+
+        // sky
+        {
+          glGenVertexArrays(1, &state.sky_vao);
+          glGenBuffers(1, &state.sky_buffer);
+          glBindVertexArray(state.sky_vao);
+          auto s = psize * state.sky_mesh.size();
+          glBindBuffer(GL_ARRAY_BUFFER, state.sky_buffer);
+          glBufferData(GL_ARRAY_BUFFER, s, state.sky_mesh.data(),
+                       GL_STATIC_DRAW);
+          glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
+                                (void *)offsetof(SkyVertexData, pos));
+          glVertexAttribPointer(attr.color, 3, GL_FLOAT, GL_FALSE, stride,
+                                (void *)offsetof(SkyVertexData, col));
+          glVertexAttribPointer(attr.uv, 2, GL_FLOAT, GL_FALSE, stride,
+                                (void *)offsetof(SkyVertexData, uv));
+          glEnableVertexAttribArray(attr.position);
+          glEnableVertexAttribArray(attr.color);
+          glEnableVertexAttribArray(attr.uv);
+          glBindBuffer(GL_ARRAY_BUFFER, 0);
+          glBindVertexArray(0);
+          glDeleteBuffers(1, &state.sky_buffer);
+        }
+      });
+
+  shader_storage::load_shader(
+      "celestial", "./shaders/celestial_vs.glsl", "./shaders/celestial_fs.glsl",
+      [&](Shader &shader) -> void {
+        Attrib attr;
+        attr.position = glGetAttribLocation(shader.id, "position");
+        attr.color = glGetAttribLocation(shader.id, "color");
+        attr.uv = glGetAttribLocation(shader.id, "texUV");
+        attr.MVP = glGetUniformLocation(shader.id, "mvp");
+        shader.attr = attr;
+
+        auto psize = sizeof(state.sky_mesh[0]);
+        auto stride = psize;
+
+        // celestial body
+        {
+          glGenVertexArrays(1, &state.celestial_vao);
+          glGenBuffers(1, &state.celestial_buffer);
+          glBindVertexArray(state.celestial_vao);
+          glBindBuffer(GL_ARRAY_BUFFER, state.celestial_buffer);
+          auto s = psize * state.sky_mesh.size();
+          glBufferData(GL_ARRAY_BUFFER, s, state.celestial_mesh.data(),
+                       GL_STATIC_DRAW);
+          glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
+                                (void *)offsetof(SkyVertexData, pos));
+          glVertexAttribPointer(attr.color, 3, GL_FLOAT, GL_FALSE, stride,
+                                (void *)offsetof(SkyVertexData, col));
+          glVertexAttribPointer(attr.uv, 2, GL_FLOAT, GL_FALSE, stride,
+                                (void *)offsetof(SkyVertexData, uv));
+          glEnableVertexAttribArray(attr.position);
+          glEnableVertexAttribArray(attr.color);
+          glEnableVertexAttribArray(attr.uv);
+          glBindBuffer(GL_ARRAY_BUFFER, 0);
+          glBindVertexArray(0);
+          glDeleteBuffers(1, &state.celestial_buffer);
+        }
       });
 
   // During init, enable debug output

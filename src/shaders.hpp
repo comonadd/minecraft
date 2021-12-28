@@ -10,8 +10,12 @@ struct Attrib {
   GLint ao;
   GLint light;
 
+  GLint color;
+
   GLint MVP;
   GLint light_pos;
+
+  GLint blend_factor;
 };
 
 struct Shader {

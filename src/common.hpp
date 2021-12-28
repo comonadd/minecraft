@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <functional>
+#include <glm/glm.hpp>
 #include <memory>
 #include <optional>
 #include <set>
@@ -42,5 +43,11 @@ using u8 = uint8_t;
 using u16 = uint16_t;
 using u32 = uint32_t;
 using u64 = uint64_t;
+
+using glm::ivec3;
+using glm::mat4;
+using glm::vec2;
+using glm::vec3;
+using glm::vec4;
 
 #endif

@@ -103,9 +103,16 @@ struct Biome {
 const int WATER_LEVEL = 30;
 
 const int TICKS_PER_SECOND = 100;
+
 // in ticks (12 minutes)
 // const int DAY_DURATION = TICKS_PER_SECOND * 60 * 12;
-const int DAY_DURATION = TICKS_PER_SECOND * 10;
+const int DAY_DURATION = TICKS_PER_SECOND * 60;
+const float ONE_HOUR = (float)DAY_DURATION / 24.0f;
+const float MORNING = 4.0f * ONE_HOUR;
+const float DAY = 12.0f * ONE_HOUR;
+const float EVENING = 18.0f * ONE_HOUR;
+const float NIGHT = 22.0f * ONE_HOUR;
+const float ONE_MINUTE = ONE_HOUR / 60.0f;
 
 struct World {
   int seed = 3849534;
@@ -123,6 +130,13 @@ struct World {
   u64 time = 0;
   // time of day [0..DAY_DURATION];
   u32 time_of_day = 0;
+
+  vec3 origin{0, 0, 0};
+
+  // updated on each frame
+  bool is_day = false;
+
+  float celestial_size = 2.5f;
 
   std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
       // Desert
