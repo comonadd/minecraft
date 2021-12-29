@@ -166,7 +166,10 @@ struct {
   float celestial_size = 2.5f;
 } state;
 
-inline glm::vec3 get_block_pos_looking_at() { return state.camera_front; }
+inline glm::vec3 get_block_pos_looking_at() {  //
+  return vec3(state.player_pos.x, state.player_pos.z + 2.0f,
+              state.player_pos.y);
+}
 
 void process_left_click() {
   auto new_block_place_pos = get_block_pos_looking_at();
@@ -182,13 +185,8 @@ void enable_cursor() {
 }
 
 void process_right_click() {
-  // auto [new_block_place_pos, chunk] = get_block_pos_looking_at();
-  // auto block_at_target = chunk_get_block_at_global(chunk,
-  // new_block_place_pos); bool can_place =
-  // can_place_at_block(block_at_target.type); if (!can_place) return;
-  // TODO: Currently, this code overrides the block we're looking at.
-  // But we need to place a new block right next to the block side we're facing.
-  // place_block_at(BlockType::Dirt, new_block_place_pos);
+  auto new_block_place_pos = get_block_pos_looking_at();
+  place_block_at(state.world, BlockType::Dirt, new_block_place_pos);
 }
 
 void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
@@ -222,16 +220,6 @@ void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
   direction.y = sin(glm::radians(state.pitch));
   direction.z = sin(glm::radians(state.yaw)) * cos(glm::radians(state.pitch));
   state.camera_front = glm::normalize(direction);
-
-  // process keys pressed
-  return;
-  bool left_click = false;
-  bool right_click = true;
-  if (left_click) {
-    process_left_click();
-  } else if (right_click) {
-    process_right_click();
-  }
 }
 
 void quit() { glfwSetWindowShouldClose(state.window, GL_TRUE); }
@@ -657,6 +645,16 @@ void reset_chunks() {
   state.world.loaded_chunks.clear();
 }
 
+void mouse_button_callback(GLFWwindow *window, int button, int action,
+                           int mods) {
+  // process keys pressed
+  if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+    process_left_click();
+  } else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+    process_right_click();
+  }
+}
+
 void key_callback(GLFWwindow *window, int key, int scancode, int action,
                   int mods) {
   if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
@@ -697,6 +695,7 @@ void init_graphics() {
 #endif
   glfwSetCursorPosCallback(state.window, mouse_callback);
   glfwSetKeyCallback(state.window, key_callback);
+  glfwSetMouseButtonCallback(state.window, mouse_button_callback);
 
   // Setup Dear ImGui context
   IMGUI_CHECKVERSION();

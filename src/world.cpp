@@ -579,6 +579,17 @@ void gen_chunk(World &world, Chunk &chunk) {
       }
     }
   }
+
+  for (auto &atom : world.changes) {
+    auto pos = atom.pos;
+    auto ch = &chunk;
+    auto pos_inside = (pos.x > ch->x && pos.x < ch->x + CHUNK_WIDTH) &&
+                      (pos.y > ch->y && pos.y < ch->y + CHUNK_LENGTH);
+    if (!pos_inside) continue;
+    auto local_pos = chunk_global_to_local_pos(&chunk, pos);
+    CHUNK_AT(chunk, local_pos.x, local_pos.y, local_pos.z).type =
+        atom.block.type;
+  }
 }
 
 void occlusion(char neighbors[27], char lights[27], float shades[27],
@@ -705,14 +716,14 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
   // Only allocate a new buffer if none was allocated before
   auto shader = shader_storage::get_shader("block");
   auto block_attrib = shader->attr;
-  if (chunk.vao == 0) {
-    // Configure the VAO
-    glGenVertexArrays(1, &chunk.vao);
-    glGenBuffers(1, &chunk.buffer);
+  //  if (chunk.vao == 0) {
+  // Configure the VAO
+  glGenVertexArrays(1, &chunk.vao);
+  glGenBuffers(1, &chunk.buffer);
 #ifdef VAO_ALLOCATION
-    fmt::print("Allocating VAO={}\n", chunk.vao);
+  fmt::print("Allocating VAO={}\n", chunk.vao);
 #endif
-  }
+  //  }
   glBindVertexArray(chunk.vao);
 
   // Update chunk buffer mesh data
@@ -804,11 +815,13 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
   }
 }
 
-void chunk_modify_block_at_global(Chunk *chunk, WorldPos pos, BlockType type) {
-  auto local_pos = chunk_global_to_local_pos(chunk, pos);
-  Block b;
-  b.type = type;
-  chunk->blocks[local_pos.x][local_pos.y][local_pos.z] = b;
+void chunk_modify_block_at_global(World &world, Chunk *chunk, WorldPos pos,
+                                  BlockType type) {
+  world.changes.push_back({.pos = pos, .block = {.type = type}});
+  // auto local_pos = chunk_global_to_local_pos(chunk, pos);
+  // Block b;
+  // b.type = type;
+  // chunk->blocks[local_pos.x][local_pos.y][local_pos.z] = b;
   chunk->is_dirty = true;
 }
 
@@ -827,7 +840,7 @@ void place_block_at(World &world, BlockType type, WorldPos pos) {
         pos.x, pos.y, pos.z);
     return;
   }
-  chunk_modify_block_at_global(chunk, pos, type);
+  chunk_modify_block_at_global(world, chunk, pos, type);
 }
 
 inline bool can_place_at_block(BlockType type) {

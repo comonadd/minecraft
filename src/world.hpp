@@ -47,7 +47,7 @@ enum class BlockType : u8 {
 
 #pragma pack(push, 1)
 struct Block {
-  BlockType type;
+  BlockType type = BlockType::Unknown;
 };
 #pragma pack(pop)
 
@@ -182,10 +182,17 @@ const float ONE_MINUTE = ONE_HOUR / 60.0f;
 constexpr int FLOAT_MIN = 0;
 constexpr int FLOAT_MAX = 1;
 
+struct Atom {
+  WorldPos pos;
+  Block block;
+};
+
 struct World {
   int seed = 3849534;
   std::vector<Chunk*> chunks{};
   std::unordered_map<ChunkId, Chunk*, hash_pair> loaded_chunks;
+
+  std::vector<Atom> changes;
 
   std::random_device rd;
   std::default_random_engine eng;
