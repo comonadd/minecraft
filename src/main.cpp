@@ -363,34 +363,18 @@ void render() {
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-// rain
-// vec3 colorDay = vec3(0.765625, 0.8671875, 0.90625);
-
-vec3 colorDay = vec3(135.0f / 256.0f, 206.0f / 256.0f, 250.0f / 256.0f);
-vec3 colorNight = vec3(0.0, 0.0, 0.0);
-
 void update() {
+  // delta time
   float current_frame = glfwGetTime();
   state.delta_time = current_frame - state.last_frame;
   state.last_frame = current_frame;
 
-  // update time
-  int ticks_passed = state.delta_time * TICKS_PER_SECOND;
-  state.world.time += ticks_passed;
-  if (state.world.time_of_day >= DAY_DURATION) {
-    state.world.time_of_day = 0;
-  } else {
-    state.world.time_of_day += ticks_passed;
-  }
-  state.world.is_day = state.world.time_of_day < (DAY_DURATION / 2);
+  // integer player position (block coord)
+  state.player_pos =
+      glm::ivec3{state.camera.camera_pos.x, state.camera.camera_pos.y,
+                 state.camera.camera_pos.z};
 
-  // calculate celestial bdy position
-  float sun_degrees =
-      720.0f * ((float)state.world.time_of_day / (float)DAY_DURATION);
-  glm::mat4 model = glm::mat4(1.0f);
-  model = glm::rotate(model, glm::radians(sun_degrees),
-                      glm::vec3(0.0f, 0.0f, 1.0f));
-  state.world.sun_pos = model * glm::vec4(0.0, 100.0f, 0.0f, 0.0f);
+  world_update(state.world, state.delta_time);
 
   // determine the target block
   state.world.target_block_pos = get_block_pos_looking_at();
@@ -399,147 +383,18 @@ void update() {
         get_block_at_global_pos(state.world, *state.world.target_block_pos);
   }
 
-  process_keys();
-
-  state.player_pos =
-      glm::ivec3{state.camera.camera_pos.x, state.camera.camera_pos.y,
-                 state.camera.camera_pos.z};
-
-  // day/night & sky color
-  float tdf = (float)state.world.time_of_day;
-  float blend_factor = 0;
-  float NIGHT_START_BF = 0.0f;
-  float MORNING_START_BF = 0.25f;
-  float DAY_START_BF = 1.0f;
-  float EVENING_START_BF = 0.6f;
-  // float total_day_passed =
-  //     (float)state.world.time_of_day / (float)DAY_DURATION;
-  if (tdf >= 0 && tdf < MORNING) {
-    // night
-    // float night_passed = (float)state.world.time_of_day / (float)MORNING;
-    blend_factor = map(0.0f, MORNING, 0.0f, MORNING_START_BF, tdf);
-  } else if (tdf > MORNING && tdf < DAY) {
-    // morning
-    // float morning_passed = (float)state.world.time_of_day / (float)DAY;
-    // blend_factor = MORNING_START_BF + (DAY_START_BF * morning_passed *
-    //                                    (1.0f - MORNING_START_BF));
-    blend_factor = map(MORNING, DAY, MORNING_START_BF, DAY_START_BF, tdf);
-  } else if (tdf < EVENING) {
-    // day
-    // float day_passed = (float)state.world.time_of_day / (float)EVENING;
-    // blend_factor = DAY_START_BF + (1.0f / day_passed);
-    blend_factor = map(DAY, EVENING, DAY_START_BF, EVENING_START_BF, tdf);
-  } else if (tdf < NIGHT) {
-    // evening
-    // float ev_passed = (float)state.world.time_of_day / (float)NIGHT;
-    // blend_factor = ev_passed * 0.8f;
-    blend_factor = map(EVENING, NIGHT, EVENING_START_BF, NIGHT_START_BF, tdf);
-  } else {
-  }
-  state.world.sky_color = mix(colorNight, colorDay, blend_factor);
-
   // Calculate the minimap image
   // calculate_minimap_tex(state.minimap_tex, state.world, state.player_pos,
   //                       state.rendering_distance);
 
   if (state.mode == Mode::Playing) {
-#ifdef MEMORY_DEBUG
-    HeapProfilerStart("output_inside.prof");
-#endif
     load_chunks_around_player(state.world, state.camera.camera_pos,
                               state.rendering_distance);
     unload_distant_chunks(state.world, state.player_pos,
                           state.rendering_distance);
-#ifdef MEMORY_DEBUG
-    HeapProfilerStop();
-#endif
   }
-}
 
-void setup_noise() {
-  int seed = 2384952;
-
-  // SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
-  state.world.height_noise =
-      OpenSimplexNoiseWParam{0.001f, 64.0f, 2.0f, 0.6f, 345972};
-
-  // TODO: Use different seed
-  state.world.rainfall_noise =
-      OpenSimplexNoiseWParam{0.0005f, 2.0f, 3.0f, 0.5f, 834952};
-  state.world.temperature_noise =
-      OpenSimplexNoiseWParam{0.00075f, 1.0f, 2.0f, 0.5f, 123871};
-
-  // biomes noise
-
-  // Desert
-  state.world.biomes_by_kind.insert(
-      {BiomeKind::Desert,
-       Biome{
-           .kind = BiomeKind::Desert,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.01f, 1.0f, 2.0f, 0.5f, seed},
-           .name = "Desert",
-       }});
-
-  // Forest
-  state.world.biomes_by_kind.insert(
-      {BiomeKind::Forest,
-       Biome{
-           .kind = BiomeKind::Forest,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.03f, 1.0f, 2.0f, 0.5f, seed},
-           .name = "Forest",
-       }});
-
-  // Grassland
-  state.world.biomes_by_kind.insert(
-      {BiomeKind::Grassland,
-       Biome{
-           .kind = BiomeKind::Grassland,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.025f, 1.0f, 2.0f, 0.5f, seed},
-           .name = "Grassland",
-       }});
-
-  // Tundra
-  state.world.biomes_by_kind.insert(
-      {BiomeKind::Tundra,
-       Biome{
-           .kind = BiomeKind::Tundra,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.02f, 1.0f, 2.0f, 0.5f, seed},
-           .name = "Tundra",
-       }});
-
-  // Taiga
-  state.world.biomes_by_kind.insert(
-      {BiomeKind::Taiga,
-       Biome{
-           .kind = BiomeKind::Taiga,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.02f, 1.0f, 2.0f, 0.5f, seed},
-           .name = "Taiga",
-       }});
-
-  // Oceans
-  state.world.biomes_by_kind.insert(
-      {BiomeKind::Ocean,
-       Biome{
-           .kind = BiomeKind::Ocean,
-           .maxHeight = WATER_LEVEL,
-           .noise = OpenSimplexNoiseWParam{0.001f, 1.0f, 2.0f, 0.5f, seed},
-           .name = "Ocean",
-       }});
-
-  // Mountains
-  state.world.biomes_by_kind.insert(
-      {BiomeKind::Mountains,
-       Biome{
-           .kind = BiomeKind::Mountains,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{1.00f, 1.0f, 2.0f, 0.5f, seed},
-           .name = "Mountains",
-       }});
+  process_keys();
 }
 
 void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
@@ -574,6 +429,23 @@ void mouse_button_callback(GLFWwindow *window, int button, int action,
   }
 }
 
+Seed random_seed() {
+  static std::random_device rd;
+  static std::default_random_engine seed_eng;
+  static std::mt19937::result_type seed =
+      rd() ^
+      ((std::mt19937::result_type)
+           std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+               .count() +
+       (std::mt19937::result_type)
+           std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::high_resolution_clock::now().time_since_epoch())
+               .count());
+  static std::mt19937_64 seed_gen{seed};
+  return seed_gen();
+}
+
 void key_callback(GLFWwindow *window, int key, int scancode, int action,
                   int mods) {
   if (key == GLFW_KEY_Q && action == GLFW_PRESS) {
@@ -584,6 +456,10 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
     // Generate world map picture
     world_dump_heights(state.world);
   } else if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+    reset_chunks();
+  } else if (key == GLFW_KEY_V && action == GLFW_PRESS) {
+    Seed seed = random_seed();
+    init_world(state.world, seed);
     reset_chunks();
   }
 }
@@ -634,7 +510,6 @@ void init_graphics() {
 int main() {
   texture_storage::init();
   init_graphics();
-  setup_noise();
   shader_storage::load_shader(
       "block", "./shaders/basic_vs.glsl", "./shaders/basic_fs.glsl",
       [&](Shader &shader) -> void {
@@ -745,6 +620,8 @@ int main() {
   glDebugMessageCallback(MessageCallback, 0);
 
   auto *window = state.window;
+
+  init_world(state.world, 88392384232734);
 
   while (!glfwWindowShouldClose(window)) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

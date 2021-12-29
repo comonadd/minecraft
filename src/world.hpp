@@ -40,6 +40,11 @@ constexpr u32 PINE_CROWN_MAX_HEIGHT = 18;
 constexpr u32 PINE_TREE_MIN_RADIUS = 1;
 constexpr u32 PINE_TREE_MAX_RADIUS = 4;
 
+constexpr vec3 rainyDayColor = vec3(0.765625, 0.8671875, 0.90625);
+constexpr vec3 colorDay =
+    vec3(135.0f / 256.0f, 206.0f / 256.0f, 250.0f / 256.0f);
+constexpr vec3 colorNight = vec3(0.0, 0.0, 0.0);
+
 struct VertexData {
   glm::vec3 pos;
   glm::vec3 normal;
@@ -165,26 +170,18 @@ struct World {
 
 void load_chunks_around_player(World& world, WorldPos center_pos,
                                uint32_t radius);
-
 void place_block_at(World& world, BlockType type, WorldPos pos);
-
 Block chunk_get_block_at_global(Chunk* chunk, WorldPos pos);
-
 void world_dump_heights(World& world);
-
 const char* get_biome_name_at(World& world, WorldPos pos);
-
 void foreach_col_in_chunk(Chunk& chunk, std::function<void(int, int)> fun);
-
 void calculate_minimap_tex(Texture& texture, World& world, WorldPos pos,
                            u32 radius);
-
 void unload_chunk(Chunk* chunk);
-
 void unload_distant_chunks(World& world, WorldPos pos, u32 rendering_distance);
-
 void init_world(World& world);
-
 optional<Block> get_block_at_global_pos(World& world, WorldPos pos);
+void init_world(World& world, Seed seed);
+void world_update(World& world, float dt);
 
 #endif
