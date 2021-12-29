@@ -142,7 +142,7 @@ struct {
       glm::radians(45.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 800.0f);
 
   // Player state
-  float speed = 16.0f;
+  float speed = 32.0f;
   WorldPos player_pos;
 
   // Other
@@ -167,8 +167,8 @@ struct {
 } state;
 
 inline glm::vec3 get_block_pos_looking_at() {  //
-  return vec3(state.player_pos.x, state.player_pos.z + 2.0f,
-              state.player_pos.y);
+  auto player_reach = 3.0f;
+  return state.camera_pos + state.camera_front * player_reach;
 }
 
 void process_left_click() {
@@ -263,10 +263,10 @@ void render_info_bar() {
   if (res != 0) {
     // do something
   }
-  ImGui::Begin("Hello, world!");
-  ImGui::Text("Information");
+  ImGui::Begin("Info");
+  ImGui::SetWindowSize({400.0f, 600.0f});
   ImGui::SameLine();
-  ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
+  ImGui::Text("Avg %.3f ms/frame (%.1f FPS)",
               1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
   ImGui::Text("Chunks loaded: %lu", state.world.loaded_chunks.size());
   ImGui::Text("X=%i, Y=%i, Z=%i", (int)round(state.camera_pos.x),
@@ -287,6 +287,18 @@ void render_info_bar() {
       round((float)state.world.time_of_day - (float)hours * (float)ONE_HOUR) /
       ONE_MINUTE;
   ImGui::Text("Time of day: %i:%i", hours, minutes);
+
+  if (auto target = state.world.target_block) {
+    auto block = *target;
+    auto target_block_name = get_block_name(block.type);
+    auto target_block_pos = *state.world.target_block_pos;
+    ImGui::Text("Target: %s", target_block_name.c_str());
+    ImGui::Text("Target pos: %i,%i,%i", target_block_pos.x, target_block_pos.y,
+                target_block_pos.z);
+  } else {
+    ImGui::Text("Target: None");
+  }
+
   ImGui::Text("Sun position: %f, %f, %f", state.world.sun_pos.x,
               state.world.sun_pos.y, state.world.sun_pos.z);
   ImGui::End();
@@ -480,6 +492,13 @@ void update() {
   model = glm::rotate(model, glm::radians(sun_degrees),
                       glm::vec3(0.0f, 0.0f, 1.0f));
   state.world.sun_pos = model * glm::vec4(0.0, 100.0f, 0.0f, 0.0f);
+
+  // determine the target block
+  state.world.target_block_pos = get_block_pos_looking_at();
+  if (state.world.target_block_pos) {
+    state.world.target_block =
+        get_block_at_global_pos(state.world, *state.world.target_block_pos);
+  }
 
   process_keys();
 

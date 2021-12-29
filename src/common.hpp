@@ -25,6 +25,7 @@ using std::string;
 using std::unordered_map;
 using std::vector;
 
+using std::make_pair;
 using std::make_shared;
 using std::make_unique;
 using std::shared_ptr;

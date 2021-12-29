@@ -8,48 +8,12 @@
 #include <set>
 #include <vector>
 
-#include "OpenSimplexNoise/OpenSimplexNoise/OpenSimplexNoise.h"
+#include "block.hpp"
+#include "noise.hpp"
 #include "shaders.hpp"
 #include "texture.hpp"
 
 using WorldPos = glm::ivec3;
-
-constexpr int TEXTURE_TILE_HEIGHT = 16;
-constexpr int TEXTURE_TILE_WIDTH = 16;
-constexpr int TEXTURE_WIDTH = 256;
-constexpr float TEXTURE_TILE_WIDTH_F = 16.0f / (float)TEXTURE_WIDTH;
-constexpr int TEXTURE_HEIGHT = TEXTURE_WIDTH;
-constexpr int TEXTURE_ROWS = TEXTURE_HEIGHT / TEXTURE_TILE_HEIGHT;
-
-#define TCOORD(__x, __y)                             \
-  (__y) + static_cast<int>(static_cast<float>(__x) / \
-                           static_cast<float>(TEXTURE_TILE_WIDTH))
-
-enum class BlockType : u8 {
-  Dirt = TCOORD(0, 0),
-  Grass = TCOORD(16, 0),
-  Stone = TCOORD(32, 0),
-  Water = TCOORD(48, 0),
-  Sand = TCOORD(64, 0),
-  Snow = TCOORD(80, 0),
-  Air = TCOORD(96, 0),
-
-  Leaves = TCOORD(112, 0),
-  PineTreeLeaves = TCOORD(128, 0),
-
-  TopGrass = TCOORD(0, 208),
-  Wood = TCOORD(16, 208),
-  TopSnow = TCOORD(32, 208),
-  PineWood = TCOORD(48, 208),
-
-  Unknown
-};
-
-#pragma pack(push, 1)
-struct Block {
-  BlockType type = BlockType::Unknown;
-};
-#pragma pack(pop)
 
 const int CHUNK_LENGTH = 16;
 const int CHUNK_WIDTH = CHUNK_LENGTH;
@@ -59,10 +23,6 @@ const int BLOCKS_OF_AIR_ABOVE = 20;
 extern float BLOCK_WIDTH;
 extern float BLOCK_LENGTH;
 extern float BLOCK_HEIGHT;
-
-using std::make_pair;
-using std::make_shared;
-using std::shared_ptr;
 
 // oak tree
 constexpr u32 MIN_TREE_HEIGHT = 6;
@@ -131,33 +91,6 @@ enum BiomeKind {
   Forest = 6
 };
 
-class OpenSimplexNoiseWParam {
-  OpenSimplexNoise::Noise osn;
-  float frequency;
-  float amplitude;
-
- public:
-  OpenSimplexNoiseWParam() {}
-
-  OpenSimplexNoiseWParam& operator=(OpenSimplexNoiseWParam op) { return *this; }
-
-  OpenSimplexNoiseWParam(float _frequency, float _amplitude, float a, float b,
-                         int seed)
-      : osn(seed), frequency(_frequency), amplitude(_amplitude) {}
-
-  float noise(u32 octaves, int x, int y) {
-    float k = 1.0f;
-    float res = 0.0f;
-    for (int i = 0; i < octaves; ++i) {
-      int kk = 2 << i;
-      res += k *
-             this->osn.eval(kk * this->frequency * x, kk * this->frequency * y);
-      k /= 2.0f;
-    }
-    return res;
-  }
-};
-
 struct Biome {
   BiomeKind kind;
   int maxHeight;
@@ -166,7 +99,6 @@ struct Biome {
 };
 
 const int WATER_LEVEL = 30;
-
 const int TICKS_PER_SECOND = 100;
 
 // in ticks (12 minutes)
@@ -223,6 +155,10 @@ struct World {
   float fog_gradient = 6.0f;
   float fog_density = 0.007f;
 
+  // this is non-null when the player has a target block
+  optional<WorldPos> target_block_pos;
+  optional<Block> target_block;
+
   std::unordered_map<BiomeKind, Biome> biomes_by_kind;
   World() { this->eng = std::default_random_engine(this->seed); }
 };
@@ -248,5 +184,7 @@ void unload_chunk(Chunk* chunk);
 void unload_distant_chunks(World& world, WorldPos pos, u32 rendering_distance);
 
 void init_world(World& world);
+
+optional<Block> get_block_at_global_pos(World& world, WorldPos pos);
 
 #endif

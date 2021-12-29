@@ -30,7 +30,6 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
   int top = bk.maxHeight - BLOCKS_OF_AIR_ABOVE;
 
   switch (bk.kind) {
-
     case BiomeKind::Desert: {
       if (height == maxHeight) {
         return BlockType::Sand;
@@ -285,7 +284,7 @@ inline BiomeKind biome_noise_to_kind_at_point(float height_noise,
     if (rainfall_noise > 0.5) {
       // high temp, high rainfall
       // needs to be jungle
-      return BiomeKind::Forest;
+      return BiomeKind::Desert;
     } else {
       // high temp, low rainfall
       return BiomeKind::Desert;
@@ -815,8 +814,20 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
   }
 }
 
+// Find the loaded chunk which contains the specified position
+Chunk *find_chunk_with_pos(World &world, WorldPos pos) {
+  Chunk *chunk = nullptr;
+  for (auto &ch : world.chunks) {
+    auto pos_inside = (pos.x > ch->x && pos.x < ch->x + CHUNK_WIDTH) &&
+                      (pos.y > ch->y && pos.y < ch->y + CHUNK_LENGTH);
+    if (pos_inside) chunk = ch;
+  }
+  return chunk;
+}
+
 void chunk_modify_block_at_global(World &world, Chunk *chunk, WorldPos pos,
                                   BlockType type) {
+  fmt::print("Modified block at {},{},{}\n", pos.x, pos.y, pos.z);
   world.changes.push_back({.pos = pos, .block = {.type = type}});
   // auto local_pos = chunk_global_to_local_pos(chunk, pos);
   // Block b;
@@ -825,14 +836,15 @@ void chunk_modify_block_at_global(World &world, Chunk *chunk, WorldPos pos,
   chunk->is_dirty = true;
 }
 
+optional<Block> get_block_at_global_pos(World &world, WorldPos pos) {
+  auto *chunk = find_chunk_with_pos(world, pos);
+  if (chunk == nullptr) return {};
+  return chunk_get_block_at_global(chunk, pos);
+}
+
 void place_block_at(World &world, BlockType type, WorldPos pos) {
   // determine which chunk is affected
-  Chunk *chunk = nullptr;
-  for (auto &ch : world.chunks) {
-    auto pos_inside = (pos.x > ch->x && pos.x < ch->x + CHUNK_WIDTH) &&
-                      (pos.y > ch->y && pos.y < ch->y + CHUNK_LENGTH);
-    if (pos_inside) chunk = ch;
-  }
+  auto *chunk = find_chunk_with_pos(world, pos);
   if (chunk == nullptr) {
     fmt::print(
         "Failed to determine which chunk to place the block in. Placement "
@@ -880,6 +892,7 @@ void load_chunks_around_player(World &world, WorldPos center_pos,
         world.loaded_chunks.insert(
             {chunk_id_from_coords(chunk_x, chunk_y), loaded_ch});
       } else if (loaded_ch->is_dirty) {
+        fmt::print("Chunk is dirty, reloading mesh...\n");
         load_chunk_at(world, chunk_x, chunk_y, *loaded_ch);
       } else {
         // no need to regenerate
@@ -967,6 +980,7 @@ void world_dump_heights(World &world) {
     auto *biome_kind_map = new array<array<Pixel, NM_W>, NM_H>();
     auto *world_height_map = new array<array<Pixel, NM_W>, NM_H>();
     auto *ortho_view = new array<array<Pixel, NM_W>, NM_H>();
+    auto *temp_map = new array<array<Pixel, NM_W>, NM_H>();
     fmt::print("Calculating noise...\n");
     Block col[CHUNK_HEIGHT];
     for (int x = 0; x < NM_W; ++x) {
@@ -1000,12 +1014,14 @@ void world_dump_heights(World &world) {
           int g = noise_value;
           int b = noise_value;
           int a = 255;
-          (*whm)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
+          (*temp_map)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
         }
 
+        auto height_noise = height_noise_at(world, x, y);
         auto temp_noise = temperature_noise_at(world, x, y);
         auto rainfall_noise = rainfall_noise_at(world, x, y);
-        auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+        auto kind = biome_noise_to_kind_at_point(height_noise, temp_noise,
+                                                 rainfall_noise);
         auto bk = world.biomes_by_kind[kind];
 
         // biome kind
@@ -1032,14 +1048,20 @@ void world_dump_heights(World &world) {
         }
       }
     }
+
     fmt::print("Done with noise.\n");
     fmt::print("Writing the images...\n");
-    stbi_write_png("temp/world_biome_noise.png", NM_W, NM_H, 4, whm->data(), 0);
-    stbi_write_png("temp/biome_kind.png", NM_W, NM_H, 4, biome_kind_map->data(),
-                   0);
+
     stbi_write_png("temp/heightmap.png", NM_W, NM_H, 4,
                    world_height_map->data(), 0);
+    stbi_write_png("temp/rain_map.png", NM_W, NM_H, 4, whm->data(), 0);
+    stbi_write_png("temp/temp_map.png", NM_W, NM_H, 4, temp_map->data(), 0);
+
+    stbi_write_png("temp/biome_kind.png", NM_W, NM_H, 4, biome_kind_map->data(),
+                   0);
+
     stbi_write_png("temp/ortho.png", NM_W, NM_H, 4, ortho_view->data(), 0);
+
     fmt::print("Done.\n");
     delete whm;
   }
