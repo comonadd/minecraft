@@ -22,12 +22,15 @@ enum class BlockType : u8 {
   Sand,
   Snow,
   Air,
+
+  TopGrass = 208,
+
   Unknown
 };
 
 #pragma pack(push, 1)
 struct Block {
-  BlockType type = BlockType::Air;
+  BlockType type;
 };
 #pragma pack(pop)
 

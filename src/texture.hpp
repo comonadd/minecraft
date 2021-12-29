@@ -15,6 +15,8 @@ struct {
   unordered_map<string, shared_ptr<Texture>> loaded{};
 } state;
 
+void init();
+
 optional<shared_ptr<Texture>> get_texture(std::string const &name);
 
 optional<shared_ptr<Texture>> load_texture(std::string const &name,

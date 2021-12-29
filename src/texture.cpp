@@ -4,6 +4,10 @@ struct {
   unordered_map<string, shared_ptr<Texture>> loaded{};
 } state;
 
+void texture_storage::init() {
+  stbi_set_flip_vertically_on_load(true);
+}
+
 optional<shared_ptr<Texture>> texture_storage::get_texture(
     std::string const &name) {
   auto it = state.loaded.find(name);

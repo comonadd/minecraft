@@ -591,6 +591,7 @@ void init_graphics() {
 }
 
 int main() {
+  texture_storage::init();
   init_graphics();
   setup_noise();
   shader_storage::load_shader(

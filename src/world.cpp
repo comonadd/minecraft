@@ -26,7 +26,7 @@ inline Chunk *is_chunk_loaded(World &world, int x, int y) {
   return loaded ? ch->second : nullptr;
 }
 
-inline BlockType block_type_for_height(Biome &bk, int height) {
+inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
   int top = bk.maxHeight - BLOCKS_OF_AIR_ABOVE;
 
   switch (bk.kind) {
@@ -40,6 +40,9 @@ inline BlockType block_type_for_height(Biome &bk, int height) {
       }
     } break;
     case BiomeKind::Grassland: {
+      if (height == maxHeight) {
+        return BlockType::TopGrass;
+      }
       if (height > (top - 6)) {
         return BlockType::Grass;
       } else if (height > (top - 20)) {
@@ -97,16 +100,28 @@ inline Block chunk_get_block_at_global(Chunk *chunk, WorldPos pos) {
 int TEXTURE_TILE_HEIGHT = 16;
 int TEXTURE_TILE_WIDTH = 16;
 int TEXTURE_WIDTH = 256;
+float TEXTURE_TILE_WIDTH_F = 16.0f / (float)TEXTURE_WIDTH;
 int TEXTURE_HEIGHT = TEXTURE_WIDTH;
 int TEXTURE_ROWS = TEXTURE_HEIGHT / TEXTURE_TILE_HEIGHT;
+
+static set<BlockType> complex_bt_textures = {
+    //
+    BlockType::TopGrass
+    //
+};
+
+bool bt_is_complex(BlockType bt) {
+  return complex_bt_textures.find(bt) != complex_bt_textures.end();
+}
 
 glm::vec2 block_type_texture_offset(BlockType bt) {
   size_t block_id = (size_t)bt;
   size_t pixel_offset = block_id * TEXTURE_TILE_WIDTH;
   size_t real_x = pixel_offset % TEXTURE_WIDTH;
   size_t real_y_row = floor(pixel_offset / TEXTURE_WIDTH);
-  glm::vec2 res{(float)real_x / (float)TEXTURE_WIDTH,
-                (float)real_y_row / (float)TEXTURE_ROWS};
+  auto x = ((float)real_x / (float)TEXTURE_WIDTH);
+  auto y = 1.0f - (((float)real_y_row + 1) / (float)TEXTURE_ROWS);
+  glm::vec2 res{x, y};
   return res;
 }
 
@@ -120,6 +135,8 @@ void make_cube_faces(ChunkMesh &mesh, float ao[6][4], float light[6][4],
                      int back, int wleft, int wright, int wtop, int wbottom,
                      int wfront, int wback, float x, float y, float z, float n,
                      BlockType block_type) {
+  // has separate textures for top/side/bottom
+  bool is_complex = bt_is_complex(block_type);
   glm::vec2 texture_offset = block_type_texture_offset(block_type);
   static const float positions[6][4][3] = {
       {{-1, -1, -1}, {-1, -1, +1}, {-1, +1, -1}, {-1, +1, +1}},
@@ -131,28 +148,49 @@ void make_cube_faces(ChunkMesh &mesh, float ao[6][4], float light[6][4],
   static const float normals[6][3] = {{-1, 0, 0}, {+1, 0, 0}, {0, +1, 0},
                                       {0, -1, 0}, {0, 0, -1}, {0, 0, +1}};
   static const float uvs[6][4][2] = {
-      {{0, 0}, {1, 0}, {0, 1}, {1, 1}}, {{1, 0}, {0, 0}, {1, 1}, {0, 1}},
-      {{0, 1}, {0, 0}, {1, 1}, {1, 0}}, {{0, 0}, {0, 1}, {1, 0}, {1, 1}},
-      {{0, 0}, {0, 1}, {1, 0}, {1, 1}}, {{1, 0}, {1, 1}, {0, 0}, {0, 1}}};
+      {{0, 0}, {1, 0}, {0, 1}, {1, 1}},                                    //
+      {{1, 0}, {0, 0}, {1, 1}, {0, 1}}, {{0, 1}, {0, 0}, {1, 1}, {1, 0}},  //
+      {{0, 0}, {0, 1}, {1, 0}, {1, 1}}, {{0, 0}, {0, 1}, {1, 0}, {1, 1}},  //
+      {{1, 0}, {1, 1}, {0, 0}, {0, 1}}};
   static const float indices[6][6] = {{0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3},
                                       {0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3},
                                       {0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3}};
   static const float flipped[6][6] = {{0, 1, 2, 1, 3, 2}, {0, 2, 1, 2, 3, 1},
                                       {0, 1, 2, 1, 3, 2}, {0, 2, 1, 2, 3, 1},
                                       {0, 1, 2, 1, 3, 2}, {0, 2, 1, 2, 3, 1}};
-  float s = 0.0625;
+  float s = TEXTURE_TILE_WIDTH_F;
   float a = 0 + 1 / 2048.0;
   float b = s - 1 / 2048.0;
   int faces[6] = {left, right, top, bottom, front, back};
+  static float complex_uv_offset[6][2] = {
+      {0, -(float)TEXTURE_TILE_HEIGHT / TEXTURE_HEIGHT},        // left
+      {0, -(float)TEXTURE_TILE_HEIGHT / TEXTURE_HEIGHT},        // right
+      {0, 0},                                                   // top
+      {0, -((float)TEXTURE_TILE_HEIGHT * 2) / TEXTURE_HEIGHT},  // bottom
+      {0, -(float)TEXTURE_TILE_HEIGHT / TEXTURE_HEIGHT},        // front
+      {0, -(float)TEXTURE_TILE_HEIGHT / TEXTURE_HEIGHT}         // back
+  };
+  static float no_uv_offset[6][2] = {
+      {0, 0},  // left
+      {0, 0},  // right
+      {0, 0},  // top
+      {0, 0},  // bottom
+      {0, 0},  // front
+      {0, 0}   // back
+  };
+  auto *extra_uv_offset = no_uv_offset;
+  if (is_complex) {
+    extra_uv_offset = complex_uv_offset;
+  } else {
+    extra_uv_offset = no_uv_offset;
+  }
   for (int i = 0; i < 6; i++) {
     if (faces[i] == 0) {
       continue;
     }
-    // int flip = ao[i][0] + ao[i][3] > ao[i][1] + ao[i][2];
-    int flip = 1;
     for (int v = 0; v < 6; v++) {
       VertexData vd;
-      int j = flip ? flipped[i][v] : indices[i][v];
+      int j = indices[i][v];
       auto xpos = positions[i][j][0];
       vd.pos.x = x + n * xpos;
       auto ypos = positions[i][j][1];
@@ -162,9 +200,12 @@ void make_cube_faces(ChunkMesh &mesh, float ao[6][4], float light[6][4],
       vd.normal.x = normals[i][0];
       vd.normal.y = normals[i][1];
       vd.normal.z = normals[i][2];
+      auto xoffset = texture_offset.x + extra_uv_offset[i][0];
+      auto yoffset = texture_offset.y + extra_uv_offset[i][1];
       vd.uv = {
-          texture_offset.x + (uvs[i][j][0] ? b : a),  // x
-          texture_offset.y + (uvs[i][j][1] ? b : a)   // y
+          xoffset + (uvs[i][j][0] ? b : a),  // x
+          yoffset + (uvs[i][j][1] ? b : a)
+          // y
       };
       vd.ao = ao[i][j];
       vd.light = light[i][j];
@@ -247,16 +288,19 @@ void gen_column_at(World &world, Block *output, int x, int y) {
                world.height_noise.fractal(16, x, y);
   int maxHeight = bk.maxHeight;
   int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
-  for (int height = columnHeight; height >= 0; --height) {
+  for (int height = columnHeight - 1; height >= 0; --height) {
     Block block;
-    block.type = block_type_for_height(bk, height);
+    block.type = block_type_for_height(bk, height, columnHeight - 1);
     output[height] = block;
   }
   while (columnHeight < WATER_LEVEL) {
     output[columnHeight].type = BlockType::Water;
     columnHeight++;
   }
-  output[columnHeight + 1].type = BlockType::Air;
+  // fill the rest with air
+  for (int i = columnHeight; i < CHUNK_HEIGHT; ++i) {
+    output[i].type = BlockType::Air;
+  }
 }
 
 // Generates the height map and block types
