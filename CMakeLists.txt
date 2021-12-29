@@ -18,7 +18,7 @@ set(sources
   ${src}/world.cpp
   ${src}/image.cpp
   ${src}/texture.cpp
-  third-party/SimplexNoise/src/SimplexNoise.cpp
+  third-party/OpenSimplexNoise/OpenSimplexNoise/OpenSimplexNoise.cpp
   third-party/imgui/imgui.cpp
   third-party/imgui/imgui_draw.cpp
   third-party/imgui/imgui_widgets.cpp

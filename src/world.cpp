@@ -58,6 +58,16 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
       if (height == maxHeight) {
         return BlockType::Snow;
       } else if (height > (top - 20)) {
+        return BlockType::Snow;
+      } else if (height >= 0) {
+        return BlockType::Stone;
+      }
+    } break;
+
+    case BiomeKind::Taiga: {
+      if (height == maxHeight) {
+        return BlockType::TopSnow;
+      } else if (height > (top - 20)) {
         return BlockType::Dirt;
       } else if (height >= 0) {
         return BlockType::Stone;
@@ -122,7 +132,10 @@ inline Block chunk_get_block_at_global(Chunk *chunk, WorldPos pos) {
 
 static set<BlockType> complex_bt_textures = {
     //
-    BlockType::TopGrass, BlockType::Wood,
+    BlockType::TopGrass,  //
+    BlockType::Wood,      //
+    BlockType::PineWood,  //
+    BlockType::TopSnow,
     //
 };
 
@@ -264,7 +277,8 @@ inline bool IS_TB_LEFT_OF(Chunk &chunk, int x, int y, int z) {
   return IS_TB_AT(chunk, nearx, y, z);
 }
 
-inline BiomeKind biome_noise_to_kind_at_point(float temp_noise,
+inline BiomeKind biome_noise_to_kind_at_point(float height_noise,
+                                              float temp_noise,
                                               float rainfall_noise) {
   if (temp_noise > 0.6) {
     // high temperature
@@ -290,17 +304,24 @@ inline BiomeKind biome_noise_to_kind_at_point(float temp_noise,
       return BiomeKind::Grassland;
     }
   } else {
-    // do something else here
-    return BiomeKind::Tundra;
+    if (rainfall_noise > 0.6) {
+      return BiomeKind::Taiga;
+    } else {
+      return BiomeKind::Tundra;
+    }
   }
 }
 
+inline float height_noise_at(World &world, int x, int y) {
+  return world.height_noise.noise(8, x, y);
+}
+
 inline float temperature_noise_at(World &world, int x, int y) {
-  return world.temperature_noise.fractal(16, x, y);
+  return (world.temperature_noise.noise(16, x, y) + 1.0f) / 2.0f;
 }
 
 inline float rainfall_noise_at(World &world, int x, int y) {
-  return world.rainfall_noise.fractal(16, x, y);
+  return (world.rainfall_noise.noise(16, x, y) + 1.0f) / 2.0f;
 }
 
 inline bool is_point_outside_chunk_boundaries(int x, int y) {
@@ -308,9 +329,11 @@ inline bool is_point_outside_chunk_boundaries(int x, int y) {
 }
 
 inline Biome biome_at_point(World &world, WorldPos pos) {
+  auto height_noise = height_noise_at(world, pos.x, pos.z);
   auto temp_noise = temperature_noise_at(world, pos.x, pos.z);
   auto rainfall_noise = rainfall_noise_at(world, pos.x, pos.z);
-  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+  auto kind =
+      biome_noise_to_kind_at_point(height_noise, temp_noise, rainfall_noise);
   auto it = world.biomes_by_kind.find(kind);
   if (it == world.biomes_by_kind.end()) {
     logger::error(
@@ -331,17 +354,17 @@ inline float noise_for_biome_at_point(World &world, Biome &biome, int x,
   const double fx = NOISE_PICTURE_WIDTH / frequency;
   const double fy = NOISE_PICTURE_WIDTH / frequency;
   auto ng = biome.noise;
-  auto noise = ng.fractal(8, (float)x / fx, (float)y / fy);
+  auto noise = ng.noise(8, (float)x / fx, (float)y / fy);
   return noise;
 }
 
 void gen_column_at(World &world, Block *output, int x, int y) {
   auto temp_noise = temperature_noise_at(world, x, y);
   auto rainfall_noise = rainfall_noise_at(world, x, y);
-  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+  auto noise = height_noise_at(world, x, y);
+  auto kind = biome_noise_to_kind_at_point(noise, temp_noise, rainfall_noise);
   auto bk = world.biomes_by_kind[kind];
   // auto biome_height_noise = bk.noise.fractal(16, x, y);
-  auto noise = world.height_noise.fractal(16, x, y);
   int maxHeight = bk.maxHeight;
   int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
   for (int height = columnHeight - 1; height >= 0; --height) {
@@ -368,6 +391,8 @@ bool can_tree_grow_on(BlockType bt) {
     case BlockType::Snow:
       return true;
     case BlockType::TopGrass:
+      return true;
+    case BlockType::TopSnow:
       return true;
     default:
       return false;
@@ -445,6 +470,84 @@ void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
   }
 }
 
+void build_pine_tree_at(World &world, Chunk &chunk, int x, int y) {
+  auto col = &CHUNK_COL_AT(chunk, x, y);
+  auto topBlockHeight = get_col_height(col);
+  if (!can_tree_grow_on(col[topBlockHeight].type)) {
+    return;
+  }
+  auto r = world.tree_noise();
+  auto has_tree_center_here = r < 0.02;
+  if (has_tree_center_here) {
+    // start building a tree
+    auto height = map(0.0f, 1.0f, MIN_PINE_TREE_HEIGHT, MAX_PINE_TREE_HEIGHT,
+                      world.tree_noise());
+    auto treeTopHeight = topBlockHeight + height;
+    auto h = topBlockHeight;
+    // stump
+    for (; h < treeTopHeight; ++h) {
+      col[h].type = BlockType::PineWood;
+    }
+    // crown
+    auto maxRadius = round(map(0.0f, 1.0f, PINE_TREE_MIN_RADIUS,
+                               PINE_TREE_MAX_RADIUS, world.tree_noise()));
+    u32 crownHeight = round(map(0.0f, 1.0f, PINE_CROWN_MIN_HEIGHT,
+                                PINE_CROWN_MAX_HEIGHT, world.tree_noise()));
+    u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
+    u32 crownTop = crownBottom + crownHeight;
+    auto radiusMax2 = maxRadius * maxRadius;
+    for (; crownBottom <= crownTop; ++crownBottom) {
+      auto even = crownBottom % 2 == 0;
+      auto radius = even ? maxRadius : PINE_TREE_MIN_RADIUS;
+      auto startX = x - radius;
+      auto startY = y - radius;
+      auto endX = x + radius;
+      auto endY = y + radius;
+      for (int cx = startX; cx <= endX; ++cx) {
+        for (int cy = startY; cy <= endY; ++cy) {
+          if (cx == x && cy == y && crownBottom < treeTopHeight) {
+            // don't replace the wood
+            // TODO: Just place wood after the crown
+            continue;
+          }
+          auto isOutsideChunkBoundaries =
+              is_point_outside_chunk_boundaries(cx, cy);
+          if (isOutsideChunkBoundaries) {
+            // TODO: Transfer this information to the chunk to be
+            // rendered with this block through some global state.
+          } else {
+            // append the block
+            // the further from the center, the less likely to have
+            // leaves here
+            // minus one because we don't count the middle
+            i32 dx = abs(cx - x) - 1;
+            i32 dy = abs(cy - y) - 1;
+            u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
+            float distanceFromCenterProp =
+                (float)distanceFromCenter2 / (float)radiusMax2;
+            // k is the base chance of leaves appearing on the edge
+            float k = 0.35f;
+            float unlikelinessOfHavingLeavesBasedOnRadius =
+                max(0.0f, distanceFromCenterProp - k);
+            // how high are we, 0.0 - 1.0
+            float howHigh = (float)crownBottom / (float)crownTop;
+            float hp = howHigh * 0.45f;
+            // float unlikelinessOfHavingLeaves = hp;
+            float unlikelinessOfHavingLeaves =
+                unlikelinessOfHavingLeavesBasedOnRadius + hp;
+            float noise = world.tree_noise();
+            auto needBlockHere = noise > unlikelinessOfHavingLeaves;
+            if (needBlockHere) {
+              CHUNK_AT(chunk, cx, cy, crownBottom).type =
+                  BlockType::PineTreeLeaves;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 // Generates the height map and block types
 void gen_chunk(World &world, Chunk &chunk) {
   for (int x = 0; x < CHUNK_WIDTH; ++x) {
@@ -465,6 +568,13 @@ void gen_chunk(World &world, Chunk &chunk) {
       switch (biome.kind) {
         case BiomeKind::Forest: {
           build_oak_tree_at(world, chunk, x, y);
+          continue;
+        } break;
+        case BiomeKind::Taiga: {
+          build_pine_tree_at(world, chunk, x, y);
+          continue;
+        } break;
+        default: {
         } break;
       }
     }
@@ -785,6 +895,12 @@ glm::ivec3 biome_color(BiomeKind bk) {
     }
     case BiomeKind::Ocean: {
       return glm::ivec3(0, 0, 255);
+    }
+    case BiomeKind::Taiga: {
+      return glm::ivec3(205, 205, 205);
+    }
+    case BiomeKind::Tundra: {
+      return glm::ivec3(255, 255, 255);
     }
     default: {
       return glm::ivec3(255, 255, 0);

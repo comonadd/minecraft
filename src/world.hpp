@@ -4,26 +4,16 @@
 #include <array>
 #include <glm/glm.hpp>
 #include <memory>
+#include <random>
 #include <set>
 #include <vector>
 
-#include "PerlinNoise/PerlinNoise.hpp"
-#include "SimplexNoise/src/SimplexNoise.h"
+#include "OpenSimplexNoise/OpenSimplexNoise/OpenSimplexNoise.h"
 #include "shaders.hpp"
 #include "texture.hpp"
 
 using WorldPos = glm::ivec3;
 
-enum class BlockType : u8 {
-  Dirt,
-  Grass,
-  Stone,
-  Water,
-  Sand,
-  Snow,
-  Air,
-
-  TopGrass = 208,
 constexpr int TEXTURE_TILE_HEIGHT = 16;
 constexpr int TEXTURE_TILE_WIDTH = 16;
 constexpr int TEXTURE_WIDTH = 256;
@@ -31,9 +21,26 @@ constexpr float TEXTURE_TILE_WIDTH_F = 16.0f / (float)TEXTURE_WIDTH;
 constexpr int TEXTURE_HEIGHT = TEXTURE_WIDTH;
 constexpr int TEXTURE_ROWS = TEXTURE_HEIGHT / TEXTURE_TILE_HEIGHT;
 
-  Wood = 208 + 4,
+#define TCOORD(__x, __y)                             \
+  (__y) + static_cast<int>(static_cast<float>(__x) / \
+                           static_cast<float>(TEXTURE_TILE_WIDTH))
 
-  Leaves = 254,
+enum class BlockType : u8 {
+  Dirt = TCOORD(0, 0),
+  Grass = TCOORD(16, 0),
+  Stone = TCOORD(32, 0),
+  Water = TCOORD(48, 0),
+  Sand = TCOORD(64, 0),
+  Snow = TCOORD(80, 0),
+  Air = TCOORD(96, 0),
+
+  Leaves = TCOORD(112, 0),
+  PineTreeLeaves = TCOORD(128, 0),
+
+  TopGrass = TCOORD(0, 208),
+  Wood = TCOORD(16, 208),
+  TopSnow = TCOORD(32, 208),
+  PineWood = TCOORD(48, 208),
 
   Unknown
 };
@@ -57,12 +64,21 @@ using std::make_pair;
 using std::make_shared;
 using std::shared_ptr;
 
+// oak tree
 constexpr u32 MIN_TREE_HEIGHT = 6;
 constexpr u32 MAX_TREE_HEIGHT = 10;
 constexpr u32 CROWN_MIN_HEIGHT = 3;
 constexpr u32 CROWN_MAX_HEIGHT = 5;
 constexpr u32 TREE_MIN_RADIUS = 2;
 constexpr u32 TREE_MAX_RADIUS = 4;
+
+// pine tree
+constexpr u32 MIN_PINE_TREE_HEIGHT = 8;
+constexpr u32 MAX_PINE_TREE_HEIGHT = 16;
+constexpr u32 PINE_CROWN_MIN_HEIGHT = 7;
+constexpr u32 PINE_CROWN_MAX_HEIGHT = 18;
+constexpr u32 PINE_TREE_MIN_RADIUS = 1;
+constexpr u32 PINE_TREE_MAX_RADIUS = 4;
 
 struct VertexData {
   glm::vec3 pos;
@@ -111,13 +127,41 @@ enum BiomeKind {
   Desert = 2,
   Ocean = 3,
   Tundra = 4,
-  Forest = 5
+  Taiga = 5,
+  Forest = 6
+};
+
+class OpenSimplexNoiseWParam {
+  OpenSimplexNoise::Noise osn;
+  float frequency;
+  float amplitude;
+
+ public:
+  OpenSimplexNoiseWParam() {}
+
+  OpenSimplexNoiseWParam& operator=(OpenSimplexNoiseWParam op) { return *this; }
+
+  OpenSimplexNoiseWParam(float _frequency, float _amplitude, float a, float b,
+                         int seed)
+      : osn(seed), frequency(_frequency), amplitude(_amplitude) {}
+
+  float noise(u32 octaves, int x, int y) {
+    float k = 1.0f;
+    float res = 0.0f;
+    for (int i = 0; i < octaves; ++i) {
+      int kk = 2 << i;
+      res += k *
+             this->osn.eval(kk * this->frequency * x, kk * this->frequency * y);
+      k /= 2.0f;
+    }
+    return res;
+  }
 };
 
 struct Biome {
   BiomeKind kind;
   int maxHeight;
-  SimplexNoise noise;
+  OpenSimplexNoiseWParam noise;
   const char* name;
 };
 
@@ -149,12 +193,12 @@ struct World {
 
   inline float tree_noise() { return this->_tree_gen(this->eng); }
 
-  siv::PerlinNoise perlin;
-  SimplexNoise simplex{0.1f, 1.0f, 2.0f, 0.5f};
+  // SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
+  OpenSimplexNoiseWParam height_noise{0.001f, 64.0f, 2.0f, 0.6f, 345972};
 
-  SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
-  SimplexNoise rainfall_noise{0.0005f, 1.0f, 2.0f, 0.5f};
-  SimplexNoise temperature_noise{0.00075f, 1.0f, 2.0f, 0.5f};
+  // TODO: Use different seed
+  OpenSimplexNoiseWParam rainfall_noise{0.0005f, 2.0f, 3.0f, 0.5f, 834952};
+  OpenSimplexNoiseWParam temperature_noise{0.00075f, 1.0f, 2.0f, 0.5f, 123871};
 
   glm::vec4 sun_pos{0.0f, 100.0f, 0.0f, 0.0f};
   // ticks passed since the beginning of the world
@@ -169,65 +213,10 @@ struct World {
 
   float celestial_size = 2.5f;
   vec3 sky_color;
-  float fog_gradient = 8.0f;
-  float fog_density = 0.005f;
+  float fog_gradient = 6.0f;
+  float fog_density = 0.007f;
 
-  std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
-      // Desert
-      {BiomeKind::Desert,
-       Biome{
-           .kind = BiomeKind::Desert,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = SimplexNoise{0.01f, 1.0f, 2.0f, 0.5f},
-           .name = "Desert",
-       }},
-
-      // Forest
-      {BiomeKind::Forest,
-       Biome{
-           .kind = BiomeKind::Forest,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = SimplexNoise{0.03f, 1.0f, 2.0f, 0.5f},
-           .name = "Forest",
-       }},
-
-      // Grassland
-      {BiomeKind::Grassland,
-       Biome{
-           .kind = BiomeKind::Grassland,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = SimplexNoise{0.025f, 1.0f, 2.0f, 0.5f},
-           .name = "Grassland",
-       }},
-
-      // Tundra
-      {BiomeKind::Tundra,
-       Biome{
-           .kind = BiomeKind::Tundra,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = SimplexNoise{0.02f, 1.0f, 2.0f, 0.5f},
-           .name = "Tundra",
-       }},
-
-      // Oceans
-      {BiomeKind::Ocean,
-       Biome{
-           .kind = BiomeKind::Ocean,
-           .maxHeight = WATER_LEVEL,
-           .noise = SimplexNoise{0.001f, 1.0f, 2.0f, 0.5f},
-           .name = "Ocean",
-       }},
-
-      // Mountains
-      {BiomeKind::Mountains,
-       Biome{
-           .kind = BiomeKind::Mountains,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = SimplexNoise{1.00f, 1.0f, 2.0f, 0.5f},
-           .name = "Mountains",
-       }},
-  };
-
+  std::unordered_map<BiomeKind, Biome> biomes_by_kind;
   World() { this->eng = std::default_random_engine(this->seed); }
 };
 

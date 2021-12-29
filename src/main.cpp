@@ -550,8 +550,89 @@ void update() {
 }
 
 void setup_noise() {
-  const siv::PerlinNoise perlin(state.world.seed);
-  state.world.perlin = perlin;
+  int seed = 2384952;
+
+  // SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
+  state.world.height_noise =
+      OpenSimplexNoiseWParam{0.001f, 64.0f, 2.0f, 0.6f, 345972};
+
+  // TODO: Use different seed
+  state.world.rainfall_noise =
+      OpenSimplexNoiseWParam{0.0005f, 2.0f, 3.0f, 0.5f, 834952};
+  state.world.temperature_noise =
+      OpenSimplexNoiseWParam{0.00075f, 1.0f, 2.0f, 0.5f, 123871};
+
+  // biomes noise
+
+  // Desert
+  state.world.biomes_by_kind.insert(
+      {BiomeKind::Desert,
+       Biome{
+           .kind = BiomeKind::Desert,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = OpenSimplexNoiseWParam{0.01f, 1.0f, 2.0f, 0.5f, seed},
+           .name = "Desert",
+       }});
+
+  // Forest
+  state.world.biomes_by_kind.insert(
+      {BiomeKind::Forest,
+       Biome{
+           .kind = BiomeKind::Forest,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = OpenSimplexNoiseWParam{0.03f, 1.0f, 2.0f, 0.5f, seed},
+           .name = "Forest",
+       }});
+
+  // Grassland
+  state.world.biomes_by_kind.insert(
+      {BiomeKind::Grassland,
+       Biome{
+           .kind = BiomeKind::Grassland,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = OpenSimplexNoiseWParam{0.025f, 1.0f, 2.0f, 0.5f, seed},
+           .name = "Grassland",
+       }});
+
+  // Tundra
+  state.world.biomes_by_kind.insert(
+      {BiomeKind::Tundra,
+       Biome{
+           .kind = BiomeKind::Tundra,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = OpenSimplexNoiseWParam{0.02f, 1.0f, 2.0f, 0.5f, seed},
+           .name = "Tundra",
+       }});
+
+  // Taiga
+  state.world.biomes_by_kind.insert(
+      {BiomeKind::Taiga,
+       Biome{
+           .kind = BiomeKind::Taiga,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = OpenSimplexNoiseWParam{0.02f, 1.0f, 2.0f, 0.5f, seed},
+           .name = "Taiga",
+       }});
+
+  // Oceans
+  state.world.biomes_by_kind.insert(
+      {BiomeKind::Ocean,
+       Biome{
+           .kind = BiomeKind::Ocean,
+           .maxHeight = WATER_LEVEL,
+           .noise = OpenSimplexNoiseWParam{0.001f, 1.0f, 2.0f, 0.5f, seed},
+           .name = "Ocean",
+       }});
+
+  // Mountains
+  state.world.biomes_by_kind.insert(
+      {BiomeKind::Mountains,
+       Biome{
+           .kind = BiomeKind::Mountains,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = OpenSimplexNoiseWParam{1.00f, 1.0f, 2.0f, 0.5f, seed},
+           .name = "Mountains",
+       }});
 }
 
 void GLAPIENTRY MessageCallback(GLenum source, GLenum type, GLuint id,
