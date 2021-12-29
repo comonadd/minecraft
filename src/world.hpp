@@ -132,7 +132,7 @@ struct World {
   // ticks passed since the beginning of the world
   u64 time = 0;
   // time of day [0..DAY_DURATION];
-  u32 time_of_day = 0;
+  u32 time_of_day = MORNING;
 
   vec3 origin{0, 0, 0};
 
@@ -140,6 +140,9 @@ struct World {
   bool is_day = false;
 
   float celestial_size = 2.5f;
+  vec3 sky_color;
+  float fog_gradient = 2.0f;
+  float fog_density = 0.01f;
 
   std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
       // Desert

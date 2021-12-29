@@ -13,7 +13,15 @@ struct Attrib {
   GLint color;
 
   GLint MVP;
+  GLint model;
+  GLint view;
+  GLint projection;
+
   GLint light_pos;
+
+  GLint sky_color;
+  GLint fog_density;
+  GLint fog_gradient;
 
   GLint blend_factor;
 };

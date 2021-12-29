@@ -173,6 +173,14 @@ void process_left_click() {
   place_block_at(state.world, BlockType::Air, new_block_place_pos);
 }
 
+void disable_cursor() {
+  glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+}
+
+void enable_cursor() {
+  glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+}
+
 void process_right_click() {
   // auto [new_block_place_pos, chunk] = get_block_pos_looking_at();
   // auto block_at_target = chunk_get_block_at_global(chunk,
@@ -184,6 +192,9 @@ void process_right_click() {
 }
 
 void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
+  if (state.mode != Mode::Playing) {
+    return;
+  }
   if (state.firstMouse) {
     state.lastX = xpos;
     state.lastY = ypos;
@@ -227,9 +238,19 @@ void quit() { glfwSetWindowShouldClose(state.window, GL_TRUE); }
 
 void toggle_menu() {
   state.mode = state.mode == Mode::Menu ? Mode::Playing : Mode::Menu;
+  if (state.mode == Mode::Menu) {
+    enable_cursor();
+  } else {
+    disable_cursor();
+  }
 }
 
 void process_keys() {
+  if (state.mode != Mode::Playing) {
+    // these keys are only for playing the game
+    // do not process them if in menu mode
+    return;
+  }
   auto *window = state.window;
 
   // movement
@@ -285,11 +306,21 @@ void render_info_bar() {
 
 void render_menu() {
   ImGui::Begin("Game menu");
-  ImGui::Text("Game menu");
+
   // Rendering distance slider
+  ImGui::Text("Rendering distance");
   float rdf = (float)state.rendering_distance;
-  ImGui::SliderFloat("float", &rdf, 0.0f, 32.0f);
+  ImGui::SliderFloat("rendering_distance", &rdf, 0.0f, 32.0f);
   state.rendering_distance = round(rdf);
+
+  // fog density
+  ImGui::Text("Fog density");
+  ImGui::SliderFloat("fog_density", &state.world.fog_density, 0.0f, 1.0f);
+
+  // fog gradient
+  ImGui::Text("Fog gradient");
+  ImGui::SliderFloat("fog_gradient", &state.world.fog_gradient, 0.0f, 2.0f);
+
   ImGui::End();
 }
 
@@ -301,13 +332,20 @@ void render_world() {
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, t->texture);
       auto block_attrib = block_shader->attr;
+
       // MV
       glm::mat4 View =
           glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
                       state.camera_up);
-      glm::mat4 mvp = state.Projection * View;
-      glUniformMatrix4fv(block_attrib.MVP, 1, GL_FALSE, &mvp[0][0]);
+      glUniformMatrix4fv(block_attrib.view, 1, GL_FALSE, &View[0][0]);
+      glUniformMatrix4fv(block_attrib.projection, 1, GL_FALSE,
+                         &state.Projection[0][0]);
+
       glUniform3fv(block_attrib.light_pos, 1, &state.world.sun_pos[0]);
+      glUniform3fv(block_attrib.sky_color, 1, &state.world.sky_color[0]);
+      glUniform1f(block_attrib.fog_density, state.world.fog_density);
+      glUniform1f(block_attrib.fog_gradient, state.world.fog_gradient);
+
       for (auto &chunk : state.world.chunks) {
         glBindVertexArray(chunk->vao);
         // render the chunk mesh
@@ -350,38 +388,8 @@ void render_sky() {
     glm::mat4 mvp = state.Projection * View * model;
     glUniformMatrix4fv(attr.MVP, 1, GL_FALSE, &mvp[0][0]);
 
-    float tdf = (float)state.world.time_of_day;
-    float blend_factor = 0;
-    float NIGHT_START_BF = 0.0f;
-    float MORNING_START_BF = 0.25f;
-    float DAY_START_BF = 1.0f;
-    float EVENING_START_BF = 0.6f;
-    // float total_day_passed =
-    //     (float)state.world.time_of_day / (float)DAY_DURATION;
-    if (tdf >= 0 && tdf < MORNING) {
-      // night
-      // float night_passed = (float)state.world.time_of_day / (float)MORNING;
-      blend_factor = map(0.0f, MORNING, 0.0f, MORNING_START_BF, tdf);
-    } else if (tdf > MORNING && tdf < DAY) {
-      // morning
-      // float morning_passed = (float)state.world.time_of_day / (float)DAY;
-      // blend_factor = MORNING_START_BF + (DAY_START_BF * morning_passed *
-      //                                    (1.0f - MORNING_START_BF));
-      blend_factor = map(MORNING, DAY, MORNING_START_BF, DAY_START_BF, tdf);
-    } else if (tdf < EVENING) {
-      // day
-      // float day_passed = (float)state.world.time_of_day / (float)EVENING;
-      // blend_factor = DAY_START_BF + (1.0f / day_passed);
-      blend_factor = map(DAY, EVENING, DAY_START_BF, EVENING_START_BF, tdf);
-    } else if (tdf < NIGHT) {
-      // evening
-      // float ev_passed = (float)state.world.time_of_day / (float)NIGHT;
-      // blend_factor = ev_passed * 0.8f;
-      blend_factor = map(EVENING, NIGHT, EVENING_START_BF, NIGHT_START_BF, tdf);
-    } else {
-    }
+    glUniform3fv(attr.sky_color, 1, &state.world.sky_color[0]);
 
-    glUniform1f(attr.blend_factor, blend_factor);
     glBindVertexArray(state.sky_vao);
     glBindBuffer(GL_ARRAY_BUFFER, state.sky_buffer);
     const auto tex = sky_tex->get();
@@ -441,12 +449,13 @@ void render() {
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
 
+  render_info_bar();
+  render_sky();
+  render_celestial();
+  render_world();
+
   switch (state.mode) {
     case Mode::Playing: {
-      render_info_bar();
-      render_sky();
-      render_celestial();
-      render_world();
       // render_minimap();
     } break;
     case Mode::Menu: {
@@ -460,6 +469,9 @@ void render() {
   glViewport(0, 0, display_w, display_h);
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
+
+vec3 colorDay = vec3(0.0, 0.3, 1.0);
+vec3 colorNight = vec3(0.0, 0.0, 0.0);
 
 void update() {
   float current_frame = glfwGetTime();
@@ -488,6 +500,39 @@ void update() {
 
   state.player_pos =
       glm::ivec3{state.camera_pos.x, state.camera_pos.y, state.camera_pos.z};
+
+  // day/night & sky color
+  float tdf = (float)state.world.time_of_day;
+  float blend_factor = 0;
+  float NIGHT_START_BF = 0.0f;
+  float MORNING_START_BF = 0.25f;
+  float DAY_START_BF = 1.0f;
+  float EVENING_START_BF = 0.6f;
+  // float total_day_passed =
+  //     (float)state.world.time_of_day / (float)DAY_DURATION;
+  if (tdf >= 0 && tdf < MORNING) {
+    // night
+    // float night_passed = (float)state.world.time_of_day / (float)MORNING;
+    blend_factor = map(0.0f, MORNING, 0.0f, MORNING_START_BF, tdf);
+  } else if (tdf > MORNING && tdf < DAY) {
+    // morning
+    // float morning_passed = (float)state.world.time_of_day / (float)DAY;
+    // blend_factor = MORNING_START_BF + (DAY_START_BF * morning_passed *
+    //                                    (1.0f - MORNING_START_BF));
+    blend_factor = map(MORNING, DAY, MORNING_START_BF, DAY_START_BF, tdf);
+  } else if (tdf < EVENING) {
+    // day
+    // float day_passed = (float)state.world.time_of_day / (float)EVENING;
+    // blend_factor = DAY_START_BF + (1.0f / day_passed);
+    blend_factor = map(DAY, EVENING, DAY_START_BF, EVENING_START_BF, tdf);
+  } else if (tdf < NIGHT) {
+    // evening
+    // float ev_passed = (float)state.world.time_of_day / (float)NIGHT;
+    // blend_factor = ev_passed * 0.8f;
+    blend_factor = map(EVENING, NIGHT, EVENING_START_BF, NIGHT_START_BF, tdf);
+  } else {
+  }
+  state.world.sky_color = mix(colorNight, colorDay, blend_factor);
 
   // Calculate the minimap image
   // calculate_minimap_tex(state.minimap_tex, state.world, state.player_pos,
@@ -570,7 +615,7 @@ void init_graphics() {
   glDepthFunc(GL_LESS);
 
 #ifdef DISABLE_CURSOR
-  glfwSetInputMode(state.window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+  disable_cursor();
 #endif
   glfwSetCursorPosCallback(state.window, mouse_callback);
   glfwSetKeyCallback(state.window, key_callback);
@@ -598,13 +643,24 @@ int main() {
       "block", "./shaders/basic_vs.glsl", "./shaders/basic_fs.glsl",
       [&](Shader &shader) -> void {
         Attrib block_attrib;
+
         block_attrib.position = glGetAttribLocation(shader.id, "position");
         block_attrib.normal = glGetAttribLocation(shader.id, "normal");
         block_attrib.uv = glGetAttribLocation(shader.id, "texUV");
         block_attrib.ao = glGetAttribLocation(shader.id, "ao");
         block_attrib.light = glGetAttribLocation(shader.id, "light");
+
         block_attrib.MVP = glGetUniformLocation(shader.id, "MVP");
+        block_attrib.model = glGetUniformLocation(shader.id, "model");
+        block_attrib.view = glGetUniformLocation(shader.id, "view");
+        block_attrib.projection = glGetUniformLocation(shader.id, "projection");
+        block_attrib.sky_color = glGetUniformLocation(shader.id, "sky_color");
         block_attrib.light_pos = glGetUniformLocation(shader.id, "light_pos");
+        block_attrib.fog_density =
+            glGetUniformLocation(shader.id, "fog_density");
+        block_attrib.fog_gradient =
+            glGetUniformLocation(shader.id, "fog_gradient");
+
         shader.attr = block_attrib;
       });
   texture_storage::load_texture("block", "images/texture.png");
@@ -621,6 +677,7 @@ int main() {
         attr.color = glGetAttribLocation(shader.id, "color");
         attr.uv = glGetAttribLocation(shader.id, "texUV");
         attr.MVP = glGetUniformLocation(shader.id, "mvp");
+        attr.sky_color = glGetUniformLocation(shader.id, "sky_color");
         attr.blend_factor = glGetUniformLocation(shader.id, "blendFactor");
         shader.attr = attr;
         auto psize = sizeof(state.sky_mesh[0]);

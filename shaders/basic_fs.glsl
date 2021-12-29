@@ -6,6 +6,7 @@ in vec3 fragment_normal;
 in float fragment_ao;
 in float fragment_light;
 in vec3 FragPos;
+in float visibility;
 
 // Ouput data
 out vec4 outColor;
@@ -14,6 +15,7 @@ out vec4 outColor;
 uniform sampler2D myTextureSampler;
 
 in vec3 fragment_light_pos;
+uniform vec3 sky_color;
 
 void main(){
     vec3 lightColor = vec3(1.0, 1.0, 1.0);
@@ -25,7 +27,7 @@ void main(){
     float diff = max(dot(fragment_normal, light_direction), 0.0);
     vec3 diffuse = diff * lightColor;
 
-    float ambientStrength = 0.1;
+    float ambientStrength = 0.5;
     vec3 ambient = ambientStrength * lightColor;
     color = (ambient + diffuse) * color;
 
@@ -44,4 +46,5 @@ void main(){
 
     // Output
     outColor = vec4(color, 1.0);
+    outColor = mix(vec4(sky_color, 1.0), outColor, visibility);
 }
