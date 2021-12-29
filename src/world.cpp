@@ -120,13 +120,6 @@ inline Block chunk_get_block_at_global(Chunk *chunk, WorldPos pos) {
   return chunk_get_block(chunk, local_pos);
 }
 
-int TEXTURE_TILE_HEIGHT = 16;
-int TEXTURE_TILE_WIDTH = 16;
-int TEXTURE_WIDTH = 256;
-float TEXTURE_TILE_WIDTH_F = 16.0f / (float)TEXTURE_WIDTH;
-int TEXTURE_HEIGHT = TEXTURE_WIDTH;
-int TEXTURE_ROWS = TEXTURE_HEIGHT / TEXTURE_TILE_HEIGHT;
-
 static set<BlockType> complex_bt_textures = {
     //
     BlockType::TopGrass, BlockType::Wood,
@@ -178,9 +171,6 @@ void make_cube_faces(ChunkMesh &mesh, float ao[6][4], float light[6][4],
   static const float indices[6][6] = {{0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3},
                                       {0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3},
                                       {0, 3, 2, 0, 1, 3}, {0, 3, 1, 0, 2, 3}};
-  static const float flipped[6][6] = {{0, 1, 2, 1, 3, 2}, {0, 2, 1, 2, 3, 1},
-                                      {0, 1, 2, 1, 3, 2}, {0, 2, 1, 2, 3, 1},
-                                      {0, 1, 2, 1, 3, 2}, {0, 2, 1, 2, 3, 1}};
   float s = TEXTURE_TILE_WIDTH_F;
   float a = 0 + 1 / 2048.0;
   float b = s - 1 / 2048.0;

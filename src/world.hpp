@@ -24,6 +24,12 @@ enum class BlockType : u8 {
   Air,
 
   TopGrass = 208,
+constexpr int TEXTURE_TILE_HEIGHT = 16;
+constexpr int TEXTURE_TILE_WIDTH = 16;
+constexpr int TEXTURE_WIDTH = 256;
+constexpr float TEXTURE_TILE_WIDTH_F = 16.0f / (float)TEXTURE_WIDTH;
+constexpr int TEXTURE_HEIGHT = TEXTURE_WIDTH;
+constexpr int TEXTURE_ROWS = TEXTURE_HEIGHT / TEXTURE_TILE_HEIGHT;
 
   Wood = 208 + 4,
 
