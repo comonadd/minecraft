@@ -30,6 +30,7 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
   int top = bk.maxHeight - BLOCKS_OF_AIR_ABOVE;
 
   switch (bk.kind) {
+
     case BiomeKind::Desert: {
       if (height > (top - 6)) {
         return BlockType::Sand;
@@ -39,18 +40,27 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
         return BlockType::Stone;
       }
     } break;
+
     case BiomeKind::Grassland: {
       if (height == maxHeight) {
         return BlockType::TopGrass;
-      }
-      if (height > (top - 6)) {
-        return BlockType::Grass;
       } else if (height > (top - 20)) {
         return BlockType::Dirt;
       } else if (height >= 0) {
         return BlockType::Stone;
       }
     } break;
+
+    case BiomeKind::Tundra: {
+      if (height == maxHeight) {
+        return BlockType::Snow;
+      } else if (height > (top - 20)) {
+        return BlockType::Dirt;
+      } else if (height >= 0) {
+        return BlockType::Stone;
+      }
+    } break;
+
     case BiomeKind::Mountains: {
       if (height > (top - 6)) {
         return BlockType::Snow;
@@ -60,15 +70,14 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
         return BlockType::Stone;
       }
     } break;
+
     case BiomeKind::Ocean: {
       return BlockType::Water;
     } break;
+
     case BiomeKind::Forest: {
       if (height == maxHeight) {
         return BlockType::TopGrass;
-      }
-      if (height > (top - 6)) {
-        return BlockType::Grass;
       } else if (height > (top - 20)) {
         return BlockType::Dirt;
       } else if (height >= 0) {
@@ -262,22 +271,43 @@ inline bool IS_TB_LEFT_OF(Chunk &chunk, int x, int y, int z) {
   return IS_TB_AT(chunk, nearx, y, z);
 }
 
-inline BiomeKind biome_noise_to_kind_at_point(float noise) {
-  if (noise > 0.6) {
-    return BiomeKind::Mountains;
-  } else if (noise > 0.4) {
-    return BiomeKind::Forest;
-  } else if (noise > 0.0) {
-    return BiomeKind::Grassland;
-  } else if (noise > -0.2) {
-    return BiomeKind::Desert;
+inline BiomeKind biome_noise_to_kind_at_point(float temp_noise,
+                                              float rainfall_noise) {
+  if (temp_noise > 0.6) {
+    // high temperature
+    if (rainfall_noise > 0.5) {
+      // high temp, high rainfall
+      // needs to be jungle
+      return BiomeKind::Forest;
+    } else {
+      // high temp, low rainfall
+      return BiomeKind::Desert;
+    }
+  } else if (temp_noise > 0.4) {
+    // moderate temperature
+    if (rainfall_noise > 0.6) {
+      // moderate temp, high rainfall
+      return BiomeKind::Forest;
+    } else if (rainfall_noise > 0.3) {
+      // moderate temp, moderate rainfall
+      return BiomeKind::Grassland;
+    } else {
+      // moderate temp, low rainfall
+      // needs to be savannah
+      return BiomeKind::Grassland;
+    }
   } else {
-    return BiomeKind::Ocean;
+    // do something else here
+    return BiomeKind::Tundra;
   }
 }
 
-inline float biome_noise_at(World &world, int x, int y) {
-  return world.biome_noise.fractal(16, x, y);
+inline float temperature_noise_at(World &world, int x, int y) {
+  return world.temperature_noise.fractal(16, x, y);
+}
+
+inline float rainfall_noise_at(World &world, int x, int y) {
+  return world.rainfall_noise.fractal(16, x, y);
 }
 
 inline bool is_point_outside_chunk_boundaries(int x, int y) {
@@ -285,10 +315,16 @@ inline bool is_point_outside_chunk_boundaries(int x, int y) {
 }
 
 inline Biome biome_at_point(World &world, WorldPos pos) {
-  auto biome_noise = biome_noise_at(world, pos.x, pos.z);
-  auto kind = biome_noise_to_kind_at_point(biome_noise);
-  auto biome = world.biomes_by_kind[kind];
-  return biome;
+  auto temp_noise = temperature_noise_at(world, pos.x, pos.z);
+  auto rainfall_noise = rainfall_noise_at(world, pos.x, pos.z);
+  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+  auto it = world.biomes_by_kind.find(kind);
+  if (it == world.biomes_by_kind.end()) {
+    logger::error(
+        fmt::format("Couldn't find biome info for biome with id={}\n", kind));
+    return it->second;
+  }
+  return it->second;
 }
 
 const char *get_biome_name_at(World &world, WorldPos pos) {
@@ -307,12 +343,12 @@ inline float noise_for_biome_at_point(World &world, Biome &biome, int x,
 }
 
 void gen_column_at(World &world, Block *output, int x, int y) {
-  auto biome_noise = biome_noise_at(world, x, y);
-  auto kind = biome_noise_to_kind_at_point(biome_noise);
+  auto temp_noise = temperature_noise_at(world, x, y);
+  auto rainfall_noise = rainfall_noise_at(world, x, y);
+  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
   auto bk = world.biomes_by_kind[kind];
-  auto biome_height_noise = bk.noise.fractal(16, x, y);
-  auto noise = (biome_noise * biome_height_noise) * 0.1 +
-               world.height_noise.fractal(16, x, y);
+  // auto biome_height_noise = bk.noise.fractal(16, x, y);
+  auto noise = world.height_noise.fractal(16, x, y);
   int maxHeight = bk.maxHeight;
   int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
   for (int height = columnHeight - 1; height >= 0; --height) {
@@ -821,9 +857,9 @@ void world_dump_heights(World &world) {
           (*ortho_view)[x][y] = c;
         }
 
-        auto biome_noise = biome_noise_at(world, x, y);
-        // biome noise
+        // rainfall noise
         {
+          auto biome_noise = rainfall_noise_at(world, x, y);
           int noise_value = round(biome_noise * 256);
           int r = noise_value;
           int g = noise_value;
@@ -832,7 +868,20 @@ void world_dump_heights(World &world) {
           (*whm)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
         }
 
-        auto kind = biome_noise_to_kind_at_point(biome_noise);
+        // temperature noise
+        {
+          auto biome_noise = temperature_noise_at(world, x, y);
+          int noise_value = round(biome_noise * 256);
+          int r = noise_value;
+          int g = noise_value;
+          int b = noise_value;
+          int a = 255;
+          (*whm)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
+        }
+
+        auto temp_noise = temperature_noise_at(world, x, y);
+        auto rainfall_noise = rainfall_noise_at(world, x, y);
+        auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
         auto bk = world.biomes_by_kind[kind];
 
         // biome kind

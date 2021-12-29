@@ -149,7 +149,7 @@ struct {
   float delta_time = 0.0f;  // Time between current frame and last frame
   float last_frame = 0.0f;  // Time of last frame
   World world;
-  int rendering_distance = 8;
+  int rendering_distance = 12;
   Mode mode = Mode::Playing;
 
   Texture minimap_tex;
@@ -315,11 +315,11 @@ void render_menu() {
 
   // fog density
   ImGui::Text("Fog density");
-  ImGui::SliderFloat("fog_density", &state.world.fog_density, 0.0f, 1.0f);
+  ImGui::SliderFloat("fog_density", &state.world.fog_density, 0.0f, 0.02f);
 
   // fog gradient
   ImGui::Text("Fog gradient");
-  ImGui::SliderFloat("fog_gradient", &state.world.fog_gradient, 0.0f, 2.0f);
+  ImGui::SliderFloat("fog_gradient", &state.world.fog_gradient, 0.0f, 16.0f);
 
   ImGui::End();
 }

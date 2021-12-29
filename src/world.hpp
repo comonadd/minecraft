@@ -104,7 +104,8 @@ enum BiomeKind {
   Mountains = 1,
   Desert = 2,
   Ocean = 3,
-  Forest = 4
+  Tundra = 4,
+  Forest = 5
 };
 
 struct Biome {
@@ -146,7 +147,8 @@ struct World {
   SimplexNoise simplex{0.1f, 1.0f, 2.0f, 0.5f};
 
   SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
-  SimplexNoise biome_noise{0.0005f, 1.0f, 2.0f, 0.5f};
+  SimplexNoise rainfall_noise{0.0005f, 1.0f, 2.0f, 0.5f};
+  SimplexNoise temperature_noise{0.00075f, 1.0f, 2.0f, 0.5f};
 
   glm::vec4 sun_pos{0.0f, 100.0f, 0.0f, 0.0f};
   // ticks passed since the beginning of the world
@@ -161,8 +163,8 @@ struct World {
 
   float celestial_size = 2.5f;
   vec3 sky_color;
-  float fog_gradient = 2.0f;
-  float fog_density = 0.01f;
+  float fog_gradient = 8.0f;
+  float fog_density = 0.005f;
 
   std::unordered_map<BiomeKind, Biome> biomes_by_kind = {
       // Desert
@@ -190,6 +192,15 @@ struct World {
            .maxHeight = CHUNK_HEIGHT,
            .noise = SimplexNoise{0.025f, 1.0f, 2.0f, 0.5f},
            .name = "Grassland",
+       }},
+
+      // Tundra
+      {BiomeKind::Tundra,
+       Biome{
+           .kind = BiomeKind::Tundra,
+           .maxHeight = CHUNK_HEIGHT,
+           .noise = SimplexNoise{0.02f, 1.0f, 2.0f, 0.5f},
+           .name = "Tundra",
        }},
 
       // Oceans
