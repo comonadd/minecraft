@@ -381,6 +381,77 @@ bool can_tree_grow_on(BlockType bt) {
   }
 }
 
+void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
+  auto col = &CHUNK_COL_AT(chunk, x, y);
+  auto topBlockHeight = get_col_height(col);
+  if (!can_tree_grow_on(col[topBlockHeight].type)) {
+    return;
+  }
+  auto r = world.tree_noise();
+  auto has_tree_center_here = r < 0.02;
+  if (has_tree_center_here) {
+    // start building a tree
+    auto height =
+        map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT, world.tree_noise());
+    auto treeTopHeight = topBlockHeight + height;
+    auto h = topBlockHeight;
+    // stump
+    for (; h < treeTopHeight; ++h) {
+      col[h].type = BlockType::Wood;
+    }
+    // crown
+    auto bottomRadius = round(
+        map(0.0f, 1.0f, TREE_MIN_RADIUS, TREE_MAX_RADIUS, world.tree_noise()));
+    u32 crownHeight = round(map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT,
+                                world.tree_noise()));
+    u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
+    u32 crownTop = crownBottom + crownHeight;
+    for (; crownBottom <= crownTop; ++crownBottom) {
+      auto radius = bottomRadius;
+      auto radius2 = radius * radius;
+      auto startX = x - radius;
+      auto startY = y - radius;
+      auto endX = x + radius;
+      auto endY = y + radius;
+      for (int cx = startX; cx <= endX; ++cx) {
+        for (int cy = startY; cy <= endY; ++cy) {
+          if (cx == x && cy == y && crownBottom < treeTopHeight) {
+            // don't replace the wood
+            // TODO: Just place wood after the crown
+            continue;
+          }
+          auto isOutsideChunkBoundaries =
+              is_point_outside_chunk_boundaries(cx, cy);
+          if (isOutsideChunkBoundaries) {
+            // TODO: Transfer this information to the chunk to be
+            // rendered with this block through some global state.
+          } else {
+            // append the block
+            // the further from the center, the less likely to have
+            // leaves here
+            // minus one because we don't count the middle
+            i32 dx = abs(cx - x) - 1;
+            i32 dy = abs(cy - y) - 1;
+            u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
+            float distanceFromCenterProp =
+                (float)distanceFromCenter2 / (float)radius2;
+            // k is the base chance of leaves appearing on the edge
+            float k = -0.05;
+            float unlikelinessOfHavingLeavesBasedOnRadius =
+                max(0.0f, distanceFromCenterProp - k);
+            float noise = world.tree_noise();
+            auto needBlockHere =
+                noise > unlikelinessOfHavingLeavesBasedOnRadius;
+            if (needBlockHere) {
+              CHUNK_AT(chunk, cx, cy, crownBottom).type = BlockType::Leaves;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 // Generates the height map and block types
 void gen_chunk(World &world, Chunk &chunk) {
   for (int x = 0; x < CHUNK_WIDTH; ++x) {
@@ -400,76 +471,7 @@ void gen_chunk(World &world, Chunk &chunk) {
       auto biome = biome_at_point(world, pos);
       switch (biome.kind) {
         case BiomeKind::Forest: {
-          auto col = &CHUNK_COL_AT(chunk, x, y);
-          auto topBlockHeight = get_col_height(col);
-          if (!can_tree_grow_on(col[topBlockHeight].type)) {
-            continue;
-          }
-          auto r = world.tree_noise();
-          auto has_tree_center_here = r < 0.02;
-          if (has_tree_center_here) {
-            // start building a tree
-            auto height = map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT,
-                              world.tree_noise());
-            auto treeTopHeight = topBlockHeight + height;
-            auto h = topBlockHeight;
-            // stump
-            for (; h < treeTopHeight; ++h) {
-              col[h].type = BlockType::Wood;
-            }
-            // crown
-            auto bottomRadius = round(map(0.0f, 1.0f, TREE_MIN_RADIUS,
-                                          TREE_MAX_RADIUS, world.tree_noise()));
-            u32 crownHeight = round(map(0.0f, 1.0f, CROWN_MIN_HEIGHT,
-                                        CROWN_MAX_HEIGHT, world.tree_noise()));
-            u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
-            u32 crownTop = crownBottom + crownHeight;
-            for (; crownBottom <= crownTop; ++crownBottom) {
-              auto radius = bottomRadius;
-              auto radius2 = radius * radius;
-              auto startX = x - radius;
-              auto startY = y - radius;
-              auto endX = x + radius;
-              auto endY = y + radius;
-              for (int cx = startX; cx <= endX; ++cx) {
-                for (int cy = startY; cy <= endY; ++cy) {
-                  if (cx == x && cy == y && crownBottom < treeTopHeight) {
-                    // don't replace the wood
-                    // TODO: Just place wood after the crown
-                    continue;
-                  }
-                  auto isOutsideChunkBoundaries =
-                      is_point_outside_chunk_boundaries(cx, cy);
-                  if (isOutsideChunkBoundaries) {
-                    // TODO: Transfer this information to the chunk to be
-                    // rendered with this block through some global state.
-                  } else {
-                    // append the block
-                    // the further from the center, the less likely to have
-                    // leaves here
-                    // minus one because we don't count the middle
-                    i32 dx = abs(cx - x) - 1;
-                    i32 dy = abs(cy - y) - 1;
-                    u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
-                    float distanceFromCenterProp =
-                        (float)distanceFromCenter2 / (float)radius2;
-                    // k is the base chance of leaves appearing on the edge
-                    float k = -0.05;
-                    float unlikelinessOfHavingLeavesBasedOnRadius =
-                        max(0.0f, distanceFromCenterProp - k);
-                    float noise = world.tree_noise();
-                    auto needBlockHere =
-                        noise > unlikelinessOfHavingLeavesBasedOnRadius;
-                    if (needBlockHere) {
-                      CHUNK_AT(chunk, cx, cy, crownBottom).type =
-                          BlockType::Leaves;
-                    }
-                  }
-                }
-              }
-            }
-          }
-
+          build_oak_tree_at(world, chunk, x, y);
         } break;
       }
     }
