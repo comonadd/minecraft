@@ -32,6 +32,9 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
   switch (bk.kind) {
 
     case BiomeKind::Desert: {
+      if (height == maxHeight) {
+        return BlockType::Sand;
+      }
       if (height > (top - 6)) {
         return BlockType::Sand;
       } else if (height > (top - 20)) {
