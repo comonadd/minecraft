@@ -22,12 +22,16 @@ void main(){
 
     // Take color from the atlas texture
     vec3 color = vec3(texture2D(myTextureSampler, UV));
+    if (color == vec3(1.0, 0.0, 1.0)) {
+      // skip the missing textures
+      discard;
+    }
 
     vec3 light_direction = normalize(fragment_light_pos - FragPos);
     float diff = max(dot(fragment_normal, light_direction), 0.0);
     vec3 diffuse = diff * lightColor;
 
-    float ambientStrength = 0.5;
+    float ambientStrength = 0.4;
     vec3 ambient = ambientStrength * lightColor;
     color = (ambient + diffuse) * color;
 
