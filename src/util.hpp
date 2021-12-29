@@ -43,4 +43,10 @@ inline float map(float minRange, float maxRange, float minDomain,
          (maxDomain - minDomain) * (value - minRange) / (maxRange - minRange);
 }
 
+// pink "missing texture" color
+inline glm::vec3 no_color() {
+  //
+  return {1.0f, 0.0f, 1.0f};
+}
+
 #endif
