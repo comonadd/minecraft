@@ -25,6 +25,10 @@ enum class BlockType : u8 {
 
   TopGrass = 208,
 
+  Wood = 208 + 4,
+
+  Leaves = 254,
+
   Unknown
 };
 
@@ -46,6 +50,13 @@ extern float BLOCK_HEIGHT;
 using std::make_pair;
 using std::make_shared;
 using std::shared_ptr;
+
+constexpr u32 MIN_TREE_HEIGHT = 6;
+constexpr u32 MAX_TREE_HEIGHT = 10;
+constexpr u32 CROWN_MIN_HEIGHT = 3;
+constexpr u32 CROWN_MAX_HEIGHT = 5;
+constexpr u32 TREE_MIN_RADIUS = 2;
+constexpr u32 TREE_MAX_RADIUS = 4;
 
 struct VertexData {
   glm::vec3 pos;
@@ -117,10 +128,19 @@ const float EVENING = 18.0f * ONE_HOUR;
 const float NIGHT = 22.0f * ONE_HOUR;
 const float ONE_MINUTE = ONE_HOUR / 60.0f;
 
+constexpr int FLOAT_MIN = 0;
+constexpr int FLOAT_MAX = 1;
+
 struct World {
   int seed = 3849534;
   std::vector<Chunk*> chunks{};
   std::unordered_map<ChunkId, Chunk*, hash_pair> loaded_chunks;
+
+  std::random_device rd;
+  std::default_random_engine eng;
+  std::uniform_real_distribution<float> _tree_gen{FLOAT_MIN, FLOAT_MAX};
+
+  inline float tree_noise() { return this->_tree_gen(this->eng); }
 
   siv::PerlinNoise perlin;
   SimplexNoise simplex{0.1f, 1.0f, 2.0f, 0.5f};
@@ -132,7 +152,7 @@ struct World {
   // ticks passed since the beginning of the world
   u64 time = 0;
   // time of day [0..DAY_DURATION];
-  u32 time_of_day = MORNING;
+  u32 time_of_day = DAY;
 
   vec3 origin{0, 0, 0};
 
@@ -190,6 +210,8 @@ struct World {
            .name = "Mountains",
        }},
   };
+
+  World() { this->eng = std::default_random_engine(this->seed); }
 };
 
 void load_chunks_around_player(World& world, WorldPos center_pos,
@@ -211,5 +233,7 @@ void calculate_minimap_tex(Texture& texture, World& world, WorldPos pos,
 void unload_chunk(Chunk* chunk);
 
 void unload_distant_chunks(World& world, WorldPos pos, u32 rendering_distance);
+
+void init_world(World& world);
 
 #endif

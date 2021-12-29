@@ -366,12 +366,6 @@ void render_minimap() {
   // }
 }
 
-float map(float minRange, float maxRange, float minDomain, float maxDomain,
-          float value) {
-  return minDomain +
-         (maxDomain - minDomain) * (value - minRange) / (maxRange - minRange);
-}
-
 void render_sky() {
   if (auto shader = shader_storage::get_shader("sky")) {
     auto sky_tex = texture_storage::get_texture("sky");

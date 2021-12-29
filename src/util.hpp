@@ -37,4 +37,10 @@ class Vector2D : public std::vector<T> {
 template <typename T>
 vector<T> make_rect_mesh();
 
+inline float map(float minRange, float maxRange, float minDomain,
+                 float maxDomain, float value) {
+  return minDomain +
+         (maxDomain - minDomain) * (value - minRange) / (maxRange - minRange);
+}
+
 #endif
