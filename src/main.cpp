@@ -464,7 +464,10 @@ void render() {
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-vec3 colorDay = vec3(0.0, 0.3, 1.0);
+// rain
+// vec3 colorDay = vec3(0.765625, 0.8671875, 0.90625);
+
+vec3 colorDay = vec3(135.0f / 256.0f, 206.0f / 256.0f, 250.0f / 256.0f);
 vec3 colorNight = vec3(0.0, 0.0, 0.0);
 
 void update() {
