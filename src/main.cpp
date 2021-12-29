@@ -22,6 +22,7 @@
 
 #include "PerlinNoise/PerlinNoise.hpp"
 #include "SimplexNoise/src/SimplexNoise.h"
+#include "camera.hpp"
 #include "imgui/backends/imgui_impl_glfw.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/imgui.h"
@@ -53,22 +54,14 @@ struct {
   int height = HEIGHT;
 
   // Camera mouse state
-  bool firstMouse = true;
-  float yaw = -90.0f;
-  float pitch = 0.0f;
-  float sensitivity = 0.1f;
-  float lastX = (float)WIDTH / 2.0f;
-  float lastY = (float)HEIGHT / 2.0f;
-  glm::vec3 camera_pos = glm::vec3(4.0, 50.0, 50.0);
-  glm::vec3 camera_front = glm::vec3(0.0, 0.0, -1.0f);
-  glm::vec3 camera_up = glm::vec3(0.0, 0.1, 0.0);
+  Camera camera{WIDTH, HEIGHT, 32.0f};
+
   // TODO: Update on resize
   // TODO: Also need to change the clipping distance based on the chunk radius
   glm::mat4 Projection = glm::perspective(
       glm::radians(45.0f), (float)WIDTH / (float)HEIGHT, 0.1f, 800.0f);
 
   // Player state
-  float speed = 32.0f;
   WorldPos player_pos;
 
   World world;
@@ -95,7 +88,7 @@ struct {
 
 inline glm::vec3 get_block_pos_looking_at() {  //
   auto player_reach = 3.0f;
-  return state.camera_pos + state.camera_front * player_reach;
+  return state.camera.camera_pos + state.camera.camera_front * player_reach;
 }
 
 void process_left_click() {
@@ -117,36 +110,12 @@ void process_right_click() {
 }
 
 void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
+  // Disable in-game camera control with mouse if not playing
   if (state.mode != Mode::Playing) {
     return;
   }
-  if (state.firstMouse) {
-    state.lastX = xpos;
-    state.lastY = ypos;
-    state.firstMouse = false;
-  }
 
-  float xoffset = xpos - state.lastX;
-  float yoffset =
-      state.lastY -
-      ypos;  // reversed since y-coordinates range from bottom to top
-  state.lastX = xpos;
-  state.lastY = ypos;
-  xoffset *= state.sensitivity;
-  yoffset *= state.sensitivity;
-
-  state.yaw += xoffset;
-  state.pitch += yoffset;
-
-  if (state.pitch > 89.0f) state.pitch = 89.0f;
-  if (state.pitch < -89.0f) state.pitch = -89.0f;
-
-  // calculate camera direction
-  glm::vec3 direction;
-  direction.x = cos(glm::radians(state.yaw)) * cos(glm::radians(state.pitch));
-  direction.y = sin(glm::radians(state.pitch));
-  direction.z = sin(glm::radians(state.yaw)) * cos(glm::radians(state.pitch));
-  state.camera_front = glm::normalize(direction);
+  camera_process_movement(state.camera, xpos, ypos);
 }
 
 void quit() { glfwSetWindowShouldClose(state.window, GL_TRUE); }
@@ -169,19 +138,19 @@ void process_keys() {
   auto *window = state.window;
 
   // movement
-  float mov_vel = state.speed * state.delta_time;
-  if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-    state.camera_pos += mov_vel * state.camera_front;
-  if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-    state.camera_pos -= mov_vel * state.camera_front;
-  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-    state.camera_pos -=
-        glm::normalize(glm::cross(state.camera_front, state.camera_up)) *
-        mov_vel;
-  if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-    state.camera_pos +=
-        glm::normalize(glm::cross(state.camera_front, state.camera_up)) *
-        mov_vel;
+  float dt = state.delta_time;
+  if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+    camera_move_forward(state.camera, dt);
+  }
+  if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+    camera_move_backward(state.camera, dt);
+  }
+  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+    camera_move_left(state.camera, dt);
+  }
+  if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+    camera_move_right(state.camera, dt);
+  }
 }
 
 void render_info_bar() {
@@ -196,8 +165,9 @@ void render_info_bar() {
   ImGui::Text("Avg %.3f ms/frame (%.1f FPS)",
               1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
   ImGui::Text("Chunks loaded: %lu", state.world.loaded_chunks.size());
-  ImGui::Text("X=%i, Y=%i, Z=%i", (int)round(state.camera_pos.x),
-              (int)round(state.camera_pos.y), (int)round(state.camera_pos.z));
+  ImGui::Text("X=%i, Y=%i, Z=%i", (int)round(state.camera.camera_pos.x),
+              (int)round(state.camera.camera_pos.y),
+              (int)round(state.camera.camera_pos.z));
   ImGui::Text("Biome: %s", get_biome_name_at(state.world, state.player_pos));
   float mem_usage_kb = (float)u.ru_maxrss;
   ImGui::Text("Total memory usage: %f MB", round(mem_usage_kb / 1024.0F));
@@ -262,8 +232,9 @@ void render_world() {
 
       // MV
       glm::mat4 View =
-          glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
-                      state.camera_up);
+          glm::lookAt(state.camera.camera_pos,
+                      state.camera.camera_pos + state.camera.camera_front,
+                      state.camera.camera_up);
       glUniformMatrix4fv(block_attrib.view, 1, GL_FALSE, &View[0][0]);
       glUniformMatrix4fv(block_attrib.projection, 1, GL_FALSE,
                          &state.Projection[0][0]);
@@ -301,10 +272,11 @@ void render_sky() {
     auto attr = shader->attr;
     // MV
     glm::mat4 View =
-        glm::lookAt(state.camera_pos, state.camera_pos + state.camera_front,
-                    state.camera_up);
+        glm::lookAt(state.camera.camera_pos,
+                    state.camera.camera_pos + state.camera.camera_front,
+                    state.camera.camera_up);
     glm::mat4 model = glm::mat4(1);
-    model = glm::translate(model, state.camera_pos);
+    model = glm::translate(model, state.camera.camera_pos);
     model = glm::scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
     glm::mat4 mvp = state.Projection * View * model;
     glUniformMatrix4fv(attr.MVP, 1, GL_FALSE, &mvp[0][0]);
@@ -333,9 +305,9 @@ void render_celestial() {
     glUseProgram(shader->id);
     auto attr = shader->attr;
     // MV
-    glm::mat4 View =
-        glm::lookAt(state.world.origin, state.world.origin + state.camera_front,
-                    state.camera_up);
+    glm::mat4 View = glm::lookAt(state.world.origin,
+                                 state.world.origin + state.camera.camera_front,
+                                 state.camera.camera_up);
     glm::mat4 model = glm::mat4(1);
     model = glm::translate(model, glm::vec3(state.world.sun_pos));
     auto s = state.world.celestial_size;
@@ -430,7 +402,8 @@ void update() {
   process_keys();
 
   state.player_pos =
-      glm::ivec3{state.camera_pos.x, state.camera_pos.y, state.camera_pos.z};
+      glm::ivec3{state.camera.camera_pos.x, state.camera.camera_pos.y,
+                 state.camera.camera_pos.z};
 
   // day/night & sky color
   float tdf = (float)state.world.time_of_day;
@@ -473,7 +446,7 @@ void update() {
 #ifdef MEMORY_DEBUG
     HeapProfilerStart("output_inside.prof");
 #endif
-    load_chunks_around_player(state.world, state.camera_pos,
+    load_chunks_around_player(state.world, state.camera.camera_pos,
                               state.rendering_distance);
     unload_distant_chunks(state.world, state.player_pos,
                           state.rendering_distance);
