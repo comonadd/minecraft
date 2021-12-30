@@ -24,14 +24,17 @@ class OpenSimplexNoiseWParam {
         amplitude(_amplitude) {}
 
   float noise(u32 octaves, float x, float y) {
-    float k = 1.0f;
+    float amp = this->amplitude;
     float res = 0.0f;
+    float amp_sum = 0.0f;
     for (int i = 0; i < octaves; ++i) {
       int kk = 2 << i;
-      res += k * this->osn->eval(kk * this->frequency * x,
-                                 kk * this->frequency * y);
-      k /= 2.0f;
+      amp_sum += amp;
+      res += amp * this->osn->eval(kk * this->frequency * x,
+                                   kk * this->frequency * y);
+      amp /= 2.0f;
     }
+    res /= amp_sum;
     return res;
   }
 };
