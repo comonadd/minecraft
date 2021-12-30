@@ -23,7 +23,7 @@ class OpenSimplexNoiseWParam {
         frequency(_frequency),
         amplitude(_amplitude) {}
 
-  float noise(u32 octaves, int x, int y) {
+  float noise(u32 octaves, float x, float y) {
     float k = 1.0f;
     float res = 0.0f;
     for (int i = 0; i < octaves; ++i) {

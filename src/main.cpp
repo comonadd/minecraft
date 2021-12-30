@@ -69,7 +69,7 @@ struct {
   // Other
   float delta_time = 0.0f;  // Time between current frame and last frame
   float last_frame = 0.0f;  // Time of last frame
-  int rendering_distance = 12;
+  int rendering_distance = 8;
   Mode mode = Mode::Playing;
 
   Texture minimap_tex;
@@ -77,10 +77,13 @@ struct {
   // skybox stuff
   GLuint sky_vao;
   GLuint sky_buffer;
+  vector<SkyVertexData> sky_mesh = make_skybox_mesh();
   GLuint celestial_buffer;
   GLuint celestial_vao;
   vector<SkyVertexData> celestial_mesh = make_celestial_body_mesh();
-  vector<SkyVertexData> sky_mesh = make_skybox_mesh();
+  GLuint cloud_vao;
+  GLuint cloud_buffer;
+  vector<SkyVertexData> cloud_mesh;
 
   // sun/moon size
   float celestial_size = 2.5f;
@@ -241,8 +244,13 @@ void render_world() {
 
       glUniform3fv(block_attrib.light_pos, 1, &state.world.sun_pos[0]);
       glUniform3fv(block_attrib.sky_color, 1, &state.world.sky_color[0]);
-      glUniform1f(block_attrib.fog_density, state.world.fog_density);
-      glUniform1f(block_attrib.fog_gradient, state.world.fog_gradient);
+      if (state.world.fog_enabled) {
+        glUniform1f(block_attrib.fog_density, state.world.fog_density);
+        glUniform1f(block_attrib.fog_gradient, state.world.fog_gradient);
+      } else {
+        glUniform1f(block_attrib.fog_density, 0.0f);
+        glUniform1f(block_attrib.fog_gradient, state.world.fog_gradient);
+      }
 
       for (auto &chunk : state.world.chunks) {
         glBindVertexArray(chunk->vao);
@@ -337,13 +345,44 @@ void render_celestial() {
   }
 }
 
+float CLOUD_MOVEMENT_SPEED = 0.02f;
+
+void render_clouds() {
+  if (auto shader = shader_storage::get_shader("clouds")) {
+    // glDepthMask(GL_FALSE);
+    glUseProgram(shader->id);
+    auto attr = shader->attr;
+    // MV
+    glm::mat4 View =
+        glm::lookAt(state.camera.camera_pos,
+                    state.camera.camera_pos + state.camera.camera_front,
+                    state.camera.camera_up);
+    glm::mat4 model = glm::mat4(1);
+    model = glm::translate(
+        model,
+        glm::vec3((float)state.world.time * CLOUD_MOVEMENT_SPEED, 0.0f, 0.0f));
+    // model = glm::scale(model, glm::vec3(1.0f, 1.0f, 1.0f));
+    glm::mat4 mvp = state.Projection * View * model;
+    glUniformMatrix4fv(attr.MVP, 1, GL_FALSE, &mvp[0][0]);
+    glBindVertexArray(state.cloud_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, state.cloud_buffer);
+    // render the chunk mesh
+    glDrawArrays(GL_TRIANGLES, 0, state.cloud_mesh.size());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+    // glDepthMask(GL_TRUE);
+  }
+}
+
 void render() {
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
 
-  render_info_bar();
+  // render_info_bar();
   render_sky();
+  render_clouds();
   render_celestial();
   render_world();
 
@@ -363,6 +402,30 @@ void render() {
   ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
+void regenerate_clouds() {
+  if (auto shader = shader_storage::get_shader("clouds")) {
+    state.cloud_mesh = make_clouds_mesh(state.player_pos);
+    auto attr = shader->attr;
+    auto psize = sizeof(state.cloud_mesh[0]);
+    auto stride = psize;
+    glBindVertexArray(state.cloud_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, state.cloud_buffer);
+    auto s = psize * state.cloud_mesh.size();
+    glBufferData(GL_ARRAY_BUFFER, s, state.cloud_mesh.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(SkyVertexData, pos));
+    glVertexAttribPointer(attr.color, 3, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(SkyVertexData, col));
+    //    glVertexAttribPointer(attr.uv, 2, GL_FLOAT, GL_FALSE, stride,
+    //                          (void *)offsetof(SkyVertexData, uv));
+    glEnableVertexAttribArray(attr.position);
+    glEnableVertexAttribArray(attr.color);
+    //    glEnableVertexAttribArray(attr.uv);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+  }
+}
+
 void update() {
   // delta time
   float current_frame = glfwGetTime();
@@ -375,6 +438,16 @@ void update() {
                  state.camera.camera_pos.z};
 
   world_update(state.world, state.delta_time);
+
+  // clouds
+  auto ct = state.world.time;
+  static float last_time_gen_clouds = 0;
+  i32 CLOUD_GEN_INTERVAL = TICKS_PER_SECOND * 2;
+  i32 cdt = (ct - last_time_gen_clouds);
+  if (cdt > CLOUD_GEN_INTERVAL) {
+    regenerate_clouds();
+    last_time_gen_clouds = ct;
+  }
 
   // determine the target block
   state.world.target_block_pos = get_block_pos_looking_at();
@@ -612,6 +685,24 @@ int main() {
           glBindBuffer(GL_ARRAY_BUFFER, 0);
           glBindVertexArray(0);
           glDeleteBuffers(1, &state.celestial_buffer);
+        }
+      });
+
+  shader_storage::load_shader(
+      "clouds", "./shaders/clouds_vs.glsl", "./shaders/clouds_fs.glsl",
+      [&](Shader &shader) -> void {
+        Attrib attr;
+        attr.position = glGetAttribLocation(shader.id, "position");
+        attr.color = glGetAttribLocation(shader.id, "color");
+        attr.uv = glGetAttribLocation(shader.id, "texUV");
+        attr.MVP = glGetUniformLocation(shader.id, "mvp");
+        shader.attr = attr;
+        {
+          glGenVertexArrays(1, &state.cloud_vao);
+          glGenBuffers(1, &state.cloud_buffer);
+          glBindVertexArray(state.cloud_vao);
+          glBindBuffer(GL_ARRAY_BUFFER, state.cloud_buffer);
+          glDeleteBuffers(1, &state.cloud_buffer);
         }
       });
 

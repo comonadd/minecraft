@@ -20,4 +20,7 @@ constexpr float TEXTURE_TILE_WIDTH_F = 16.0f / (float)TEXTURE_WIDTH;
 constexpr int TEXTURE_HEIGHT = TEXTURE_WIDTH;
 constexpr int TEXTURE_ROWS = TEXTURE_HEIGHT / TEXTURE_TILE_HEIGHT;
 
+constexpr int FLOAT_MIN = 0;
+constexpr int FLOAT_MAX = 1;
+
 #endif

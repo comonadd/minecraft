@@ -17,7 +17,7 @@ using WorldPos = glm::ivec3;
 
 const int CHUNK_LENGTH = 16;
 const int CHUNK_WIDTH = CHUNK_LENGTH;
-const int CHUNK_HEIGHT = 64;
+const int CHUNK_HEIGHT = 128;
 const int BLOCKS_OF_AIR_ABOVE = 20;
 
 extern float BLOCK_WIDTH;
@@ -107,17 +107,13 @@ const int WATER_LEVEL = 30;
 const int TICKS_PER_SECOND = 100;
 
 // in ticks (12 minutes)
-// const int DAY_DURATION = TICKS_PER_SECOND * 60 * 12;
-const int DAY_DURATION = TICKS_PER_SECOND * 60;
+const int DAY_DURATION = TICKS_PER_SECOND * 60 * 12;
 const float ONE_HOUR = (float)DAY_DURATION / 24.0f;
 const float MORNING = 4.0f * ONE_HOUR;
 const float DAY = 12.0f * ONE_HOUR;
 const float EVENING = 18.0f * ONE_HOUR;
 const float NIGHT = 22.0f * ONE_HOUR;
 const float ONE_MINUTE = ONE_HOUR / 60.0f;
-
-constexpr int FLOAT_MIN = 0;
-constexpr int FLOAT_MAX = 1;
 
 struct Atom {
   WorldPos pos;
@@ -159,6 +155,7 @@ struct World {
   vec3 sky_color;
   float fog_gradient = 6.0f;
   float fog_density = 0.007f;
+  bool fog_enabled = true;
 
   // this is non-null when the player has a target block
   optional<WorldPos> target_block_pos;
