@@ -313,15 +313,16 @@ inline BiomeKind biome_noise_to_kind_at_point(float height_noise,
 }
 
 inline float height_noise_at(World &world, int x, int y) {
-  return world.height_noise.noise(8, x, y);
+  auto actual_noise = world.height_noise.noise(6, x, y);
+  return (actual_noise + 1.0f) / 2.0f;
 }
 
 inline float temperature_noise_at(World &world, int x, int y) {
-  return (world.temperature_noise.noise(16, x, y) + 1.0f) / 2.0f;
+  return (world.temperature_noise.noise(4, x, y) + 1.0f) / 2.0f;
 }
 
 inline float rainfall_noise_at(World &world, int x, int y) {
-  return (world.rainfall_noise.noise(16, x, y) + 1.0f) / 2.0f;
+  return (world.rainfall_noise.noise(2, x, y) + 1.0f) / 2.0f;
 }
 
 inline bool is_point_outside_chunk_boundaries(int x, int y) {
@@ -366,7 +367,7 @@ void gen_column_at(World &world, Block *output, int x, int y) {
   auto &bk = world.biomes_by_kind[kind];
   // auto biome_height_noise = bk.noise.fractal(16, x, y);
   int maxHeight = bk.maxHeight;
-  int columnHeight = (noise + 1.0) * ((float)maxHeight / 2.0);
+  int columnHeight = noise * (float)maxHeight;
   for (int height = columnHeight - 1; height >= 0; --height) {
     Block block;
     block.type = block_type_for_height(bk, height, columnHeight - 1);
@@ -1107,7 +1108,7 @@ void calculate_minimap_tex(Texture &texture, World &world, WorldPos pos,
 
 void init_world(World &world, Seed seed) {
   world.height_noise =
-      OpenSimplexNoiseWParam{0.001f, 64.0f, 2.0f, 0.6f, seed + 28394723234234};
+      OpenSimplexNoiseWParam{0.0025f, 32.0f, 2.0f, 0.6f, seed + 28394723234234};
   world.rainfall_noise =
       OpenSimplexNoiseWParam{0.0005f, 2.0f, 3.0f, 0.5f, seed + 89273492837497};
   world.temperature_noise =

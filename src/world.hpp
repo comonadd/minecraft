@@ -103,7 +103,7 @@ struct Biome {
   const char* name;
 };
 
-const int WATER_LEVEL = 30;
+const int WATER_LEVEL = 50;
 const int TICKS_PER_SECOND = 100;
 
 // in ticks (12 minutes)

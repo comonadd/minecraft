@@ -68,7 +68,6 @@ inline vector<SkyVertexData> make_clouds_mesh(WorldPos center) {
       }
     }
   }
-  startx += 2.0f;
   return res;
 }
 

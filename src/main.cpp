@@ -348,6 +348,7 @@ void render_celestial() {
 float CLOUD_MOVEMENT_SPEED = 0.02f;
 
 void render_clouds() {
+  if (state.cloud_mesh.size() == 0) return;
   if (auto shader = shader_storage::get_shader("clouds")) {
     // glDepthMask(GL_FALSE);
     glUseProgram(shader->id);
@@ -376,19 +377,19 @@ void render_clouds() {
 }
 
 void render() {
-  ImGui_ImplOpenGL3_NewFrame();
-  ImGui_ImplGlfw_NewFrame();
-  ImGui::NewFrame();
-
-  // render_info_bar();
   render_sky();
   render_clouds();
   render_celestial();
   render_world();
 
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+
   switch (state.mode) {
     case Mode::Playing: {
       // render_minimap();
+      render_info_bar();
     } break;
     case Mode::Menu: {
       render_menu();
@@ -647,7 +648,6 @@ int main() {
           glEnableVertexAttribArray(attr.uv);
           glBindBuffer(GL_ARRAY_BUFFER, 0);
           glBindVertexArray(0);
-          glDeleteBuffers(1, &state.sky_buffer);
         }
       });
 
@@ -684,7 +684,6 @@ int main() {
           glEnableVertexAttribArray(attr.uv);
           glBindBuffer(GL_ARRAY_BUFFER, 0);
           glBindVertexArray(0);
-          glDeleteBuffers(1, &state.celestial_buffer);
         }
       });
 
@@ -702,7 +701,6 @@ int main() {
           glGenBuffers(1, &state.cloud_buffer);
           glBindVertexArray(state.cloud_vao);
           glBindBuffer(GL_ARRAY_BUFFER, state.cloud_buffer);
-          glDeleteBuffers(1, &state.cloud_buffer);
         }
       });
 
