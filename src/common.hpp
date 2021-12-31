@@ -19,12 +19,16 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#include <filesystem>
+
 using std::byte;
 using std::pair;
 using std::set;
 using std::string;
 using std::unordered_map;
 using std::vector;
+
+namespace fs = std::filesystem;
 
 using std::make_pair;
 using std::make_shared;

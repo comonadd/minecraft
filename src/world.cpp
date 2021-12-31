@@ -154,6 +154,14 @@ glm::vec2 block_type_texture_offset(BlockType bt) {
   return res;
 }
 
+glm::vec2 block_type_texture_offset_int(BlockType bt) {
+  auto offsetf = block_type_texture_offset(bt);
+  auto w = TEXTURE_WIDTH;
+  auto h = TEXTURE_HEIGHT;
+  auto offset = glm::ivec2(offsetf.x * (float)w, offsetf.y * (float)h);
+  return offset;
+}
+
 glm::vec2 block_type_texture_offset_for_face(int face) {
   int debugFaceTexturesOffset = 80;
   return block_type_texture_offset((BlockType)(face + debugFaceTexturesOffset));
@@ -936,17 +944,31 @@ glm::ivec3 biome_color(BiomeKind bk) {
   }
 }
 
-constexpr int NM_W = 1024;
-constexpr int NM_H = 1024;
-
+// average color for a block
 Color block_kind_color(BlockType bt) {
   if (auto atlas_image = image_storage::get_image("block")) {
-    auto offsetf = block_type_texture_offset(bt);
-    auto w = atlas_image->width;
-    auto h = atlas_image->height;
-    auto offset = glm::ivec2(offsetf.x * (float)w, offsetf.y * (float)h);
-    auto pix = (*atlas_image)(offset.x, offset.y);
-    return pix;
+    auto offset = block_type_texture_offset_int(bt);
+    // calculate the average
+    ivec4 res{(byte)0, (byte)0, (byte)0, (byte)0};
+    u32 npixels = 0;
+    for (i32 x = 0; x < 1; ++x) {
+      for (i32 y = 0; y < 1; ++y) {
+        Color pix = (*atlas_image)(offset.x + x, offset.y - y);
+        res.r += static_cast<i32>(pix.r);
+        res.g += static_cast<i32>(pix.g);
+        res.b += static_cast<i32>(pix.b);
+        res.a += static_cast<i32>(pix.a);
+        npixels++;
+      }
+    }
+    float npixelsf = (float)npixels;
+    Color col{
+        static_cast<byte>(static_cast<float>(res.r) / npixelsf),
+        static_cast<byte>(static_cast<float>(res.g) / npixelsf),
+        static_cast<byte>(static_cast<float>(res.b) / npixelsf),
+        static_cast<byte>(static_cast<float>(res.a) / npixelsf),
+    };
+    return res;
   }
   return MISSING_COLOR;
 }
@@ -966,107 +988,117 @@ void foreach_col_in_chunk(Chunk &chunk, std::function<void(int, int)> fun) {
   }
 }
 
-void world_dump_heights(World &world) {
-  int width, height, nrChannels;
-  unsigned char *texture =
-      stbi_load("./images/texture.png", &width, &height, &nrChannels, 0);
-  if (!texture) {
-    fmt::print("Failed to load texture\n");
-    return;
-  }
+constexpr int NM_W = 1024;
+constexpr int NM_H = NM_W;
 
-  // biome noise map
+void world_dump_heights(World &world, const string &out_dir) {
+  fs::create_directory(out_dir);
+
+  auto *ortho_view = new array<array<Pixel, NM_W>, NM_H>();
   {
-    fmt::print("Generating a biome noise map dump...\n");
-    auto *whm = new array<array<Pixel, NM_W>, NM_H>();
-    auto *biome_kind_map = new array<array<Pixel, NM_W>, NM_H>();
-    auto *world_height_map = new array<array<Pixel, NM_W>, NM_H>();
-    auto *ortho_view = new array<array<Pixel, NM_W>, NM_H>();
-    auto *temp_map = new array<array<Pixel, NM_W>, NM_H>();
-    fmt::print("Calculating noise...\n");
-    Block col[CHUNK_HEIGHT];
-    for (int x = 0; x < NM_W; ++x) {
-      for (int y = 0; y < NM_H; ++y) {
-        gen_column_at(world, col, x, y);
-        uint32_t height = get_col_height(col);
-        Block topBlock = col[height];
-
-        // full map ortho view
-        {
-          auto c = block_kind_color(topBlock.type);
-          (*ortho_view)[x][y] = c;
-        }
-
-        // rainfall noise
-        {
-          auto biome_noise = rainfall_noise_at(world, x, y);
-          int noise_value = round(biome_noise * 256);
-          int r = noise_value;
-          int g = noise_value;
-          int b = noise_value;
-          int a = 255;
-          (*whm)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
-        }
-
-        // temperature noise
-        {
-          auto biome_noise = temperature_noise_at(world, x, y);
-          int noise_value = round(biome_noise * 256);
-          int r = noise_value;
-          int g = noise_value;
-          int b = noise_value;
-          int a = 255;
-          (*temp_map)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
-        }
-
-        auto height_noise = height_noise_at(world, x, y);
-        auto temp_noise = temperature_noise_at(world, x, y);
-        auto rainfall_noise = rainfall_noise_at(world, x, y);
-        auto kind = biome_noise_to_kind_at_point(height_noise, temp_noise,
-                                                 rainfall_noise);
-        auto &bk = world.biomes_by_kind[kind];
-
-        // biome kind
-        {
-          auto bk_color = biome_color(bk.kind);
-          int r = bk_color.r;
-          int g = bk_color.g;
-          int b = bk_color.b;
-          int a = 255;
-          (*biome_kind_map)[x][y] =
-              rgba_color(byte(r), byte(g), byte(b), byte(a));
-        }
-
-        // heightmap
-        {
-          auto noise = noise_for_biome_at_point(world, bk, x, y);
-          int noise_value = round(noise * 256);
-          int r = noise_value;
-          int g = noise_value;
-          int b = noise_value;
-          int a = 255;
-          (*world_height_map)[x][y] =
-              rgba_color(byte(r), byte(g), byte(b), byte(a));
+    auto *chunk = new Chunk();
+    fmt::print("Generating complete orthogonal view image\n");
+    // full map ortho view (by chunk)
+    for (i32 x = 0; x < NM_W; x += CHUNK_WIDTH) {
+      for (i32 y = 0; y < NM_H; y += CHUNK_LENGTH) {
+        chunk->x = x;
+        chunk->y = y;
+        gen_chunk(world, *chunk);
+        for (i32 lx = 0; lx < CHUNK_WIDTH; ++lx) {
+          for (i32 ly = 0; ly < CHUNK_LENGTH; ++ly) {
+            auto xx = x + lx;
+            auto yy = y + ly;
+            auto col = &CHUNK_COL_AT(*chunk, lx, ly);
+            uint32_t height = get_col_height(col);
+            Block topBlock = col[height];
+            auto c = block_kind_color(topBlock.type);
+            (*ortho_view)[xx][yy] = c;
+          }
         }
       }
     }
-
-    fmt::print("Done with noise.\n");
-    fmt::print("Writing the images...\n");
-
-    stbi_write_png("temp/heightmap.png", NM_W, NM_H, 4,
-                   world_height_map->data(), 0);
-    stbi_write_png("temp/rain_map.png", NM_W, NM_H, 4, whm->data(), 0);
-    stbi_write_png("temp/temp_map.png", NM_W, NM_H, 4, temp_map->data(), 0);
-
-    stbi_write_png("temp/biome_kind.png", NM_W, NM_H, 4, biome_kind_map->data(),
-                   0);
-
-    stbi_write_png("temp/ortho.png", NM_W, NM_H, 4, ortho_view->data(), 0);
-
-    fmt::print("Done.\n");
-    delete whm;
   }
+
+  fmt::print("Generating other noise maps...\n");
+  auto *whm = new array<array<Pixel, NM_W>, NM_H>();
+  auto *biome_kind_map = new array<array<Pixel, NM_W>, NM_H>();
+  auto *world_height_map = new array<array<Pixel, NM_W>, NM_H>();
+  auto *temp_map = new array<array<Pixel, NM_W>, NM_H>();
+
+  for (int x = 0; x < NM_W; ++x) {
+    for (int y = 0; y < NM_H; ++y) {
+      auto temp_noise = temperature_noise_at(world, x, y);
+      auto rainfall_noise = rainfall_noise_at(world, x, y);
+
+      // rainfall noise
+      {
+        int noise_value = round(rainfall_noise * 256);
+        int r = noise_value;
+        int g = noise_value;
+        int b = noise_value;
+        int a = 255;
+        (*whm)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
+      }
+
+      // temperature noise
+      {
+        int noise_value = round(temp_noise * 256);
+        int r = noise_value;
+        int g = noise_value;
+        int b = noise_value;
+        int a = 255;
+        (*temp_map)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
+      }
+
+      auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+      auto &bk = world.biomes_by_kind[kind];
+      auto noise = height_noise_at(world, x, y);
+
+      // biome kind
+      {
+        auto bk_color = biome_color(bk.kind);
+        int r = bk_color.r;
+        int g = bk_color.g;
+        int b = bk_color.b;
+        int a = 255;
+        (*biome_kind_map)[x][y] =
+            rgba_color(byte(r), byte(g), byte(b), byte(a));
+      }
+
+      // heightmap
+      {
+        int noise_value = round(noise * 256);
+        int r = noise_value;
+        int g = noise_value;
+        int b = noise_value;
+        int a = 255;
+        (*world_height_map)[x][y] =
+            rgba_color(byte(r), byte(g), byte(b), byte(a));
+      }
+    }
+  }
+
+  fmt::print("Done with noise.\n");
+  fmt::print("Writing the images into directory at {}...\n", out_dir);
+
+  stbi_write_png(fmt::format("{}/heightmap.png", out_dir).c_str(), NM_W, NM_H,
+                 4, world_height_map->data(), 0);
+  stbi_write_png(fmt::format("{}/rain_map.png", out_dir).c_str(), NM_W, NM_H, 4,
+                 whm->data(), 0);
+  stbi_write_png(fmt::format("{}/temp_map.png", out_dir).c_str(), NM_W, NM_H, 4,
+                 temp_map->data(), 0);
+
+  stbi_write_png(fmt::format("{}/biome_kind.png", out_dir).c_str(), NM_W, NM_H,
+                 4, biome_kind_map->data(), 0);
+  stbi_write_png(fmt::format("{}/ortho.png", out_dir).c_str(), NM_W, NM_H, 4,
+                 ortho_view->data(), 0);
+
+  fmt::print("Done.\n");
+  delete whm;
+  delete biome_kind_map;
+  delete world_height_map;
+  delete temp_map;
+  delete ortho_view;
 }
 
 // Calculate a PNG image representing the orthogonal view of the

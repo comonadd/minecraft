@@ -6,6 +6,9 @@ set(src "../src")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+set(CMAKE_CXX_STANDARD 20)
+add_compile_options(-Wall)
+
 if (WIN32)
   set(platform_sources ${src}/platform/win32.cpp)
 elseif (UNIX)
@@ -30,9 +33,6 @@ set(sources
 if (DISABLE_CURSOR STREQUAL "1")
     add_definitions(-DDISABLE_CURSOR)
 endif ()
-
-set(CMAKE_CXX_STANDARD 20)
-add_compile_options(-Wall)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_definitions(-DDEBUG)

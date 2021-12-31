@@ -10,6 +10,7 @@
 #include <sys/time.h>
 
 #include <array>
+#include <cxxopts.hpp>
 #include <fstream>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -34,6 +35,7 @@
 
 const int WIDTH = 1920;
 const int HEIGHT = 1080;
+constexpr auto DEFAULT_OUT_DIR = "./temp";
 
 struct Entity {
   GLuint vbo;
@@ -528,7 +530,7 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action,
     toggle_menu();
   } else if (key == GLFW_KEY_H && action == GLFW_PRESS) {
     // Generate world map picture
-    world_dump_heights(state.world);
+    world_dump_heights(state.world, DEFAULT_OUT_DIR);
   } else if (key == GLFW_KEY_R && action == GLFW_PRESS) {
     reset_chunks();
   } else if (key == GLFW_KEY_V && action == GLFW_PRESS) {
@@ -547,6 +549,7 @@ void init_graphics() {
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
   glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+  glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
   state.window = glfwCreateWindow(state.width, state.height, "OpenGL", nullptr,
                                   nullptr);  // Windowed
   glfwMakeContextCurrent(state.window);
@@ -581,9 +584,7 @@ void init_graphics() {
   ImGui_ImplOpenGL3_Init(glsl_version);
 }
 
-int main() {
-  texture_storage::init();
-  init_graphics();
+void load_shaders() {
   shader_storage::load_shader(
       "block", "./shaders/basic_vs.glsl", "./shaders/basic_fs.glsl",
       [&](Shader &shader) -> void {
@@ -608,11 +609,6 @@ int main() {
 
         shader.attr = block_attrib;
       });
-  texture_storage::load_texture("block", "images/texture.png");
-
-  texture_storage::load_texture("sky", "images/sky.png");
-  texture_storage::load_texture("sun", "images/sun.png");
-  texture_storage::load_texture("moon", "images/moon.png");
 
   shader_storage::load_shader(
       "sky", "./shaders/sky_vs.glsl", "./shaders/sky_fs.glsl",
@@ -703,6 +699,35 @@ int main() {
           glBindBuffer(GL_ARRAY_BUFFER, state.cloud_buffer);
         }
       });
+}
+
+void load_textures() {
+  texture_storage::init();
+  texture_storage::load_texture("block", "images/texture.png");
+  texture_storage::load_texture("sky", "images/sky.png");
+  texture_storage::load_texture("sun", "images/sun.png");
+  texture_storage::load_texture("moon", "images/moon.png");
+}
+
+Seed DEFAULT_SEED = 2873947234821;
+
+int main(int argc, char **argv) {
+  cxxopts::Options options("Minecraft",
+                           "Procedurally generated voxel world simulation");
+  options.add_options()                                                       //
+      ("g,gen", "Generate worldgen images and exit", cxxopts::value<bool>())  //
+      ("o,gen-out", "Worldgen output directory",
+       cxxopts::value<string>()->default_value(DEFAULT_OUT_DIR))  //
+      ("s,seed", "Worldgen seed",
+       cxxopts::value<u64>()->default_value(std::to_string(DEFAULT_SEED)))  //
+      ;
+
+  init_graphics();
+
+  // load resources
+  load_textures();
+
+  load_shaders();
 
   // During init, enable debug output
   glEnable(GL_DEBUG_OUTPUT);
@@ -710,7 +735,26 @@ int main() {
 
   auto *window = state.window;
 
-  init_world(state.world, 88392384232734);
+  auto parsed_opts = options.parse(argc, argv);
+  auto seed = parsed_opts["seed"].as<u64>();
+
+  init_world(state.world, seed);
+
+  if (parsed_opts["gen"].as<bool>()) {
+    fmt::print("Generating the worldgen maps with seed={}...\n", seed);
+    auto out_dir_given = parsed_opts["gen-out"].as<string>();
+    auto out_dir = out_dir_given != "" ? out_dir_given : DEFAULT_OUT_DIR;
+    auto start = std::chrono::high_resolution_clock::now();
+    world_dump_heights(state.world, out_dir);
+    auto now = std::chrono::high_resolution_clock::now();
+    auto milliseconds =
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
+    auto ms = milliseconds.count();
+    fmt::print("Took {} ms!\n", ms);
+    return 0;
+  }
+
+  glfwShowWindow(state.window);
 
   while (!glfwWindowShouldClose(window)) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

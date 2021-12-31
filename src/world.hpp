@@ -169,7 +169,7 @@ void load_chunks_around_player(World& world, WorldPos center_pos,
                                uint32_t radius);
 void place_block_at(World& world, BlockType type, WorldPos pos);
 Block chunk_get_block_at_global(Chunk* chunk, WorldPos pos);
-void world_dump_heights(World& world);
+void world_dump_heights(World& world, const string& out_dir);
 const char* get_biome_name_at(World& world, WorldPos pos);
 void foreach_col_in_chunk(Chunk& chunk, std::function<void(int, int)> fun);
 void calculate_minimap_tex(Texture& texture, World& world, WorldPos pos,
