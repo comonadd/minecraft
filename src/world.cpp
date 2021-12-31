@@ -285,8 +285,7 @@ inline bool IS_TB_LEFT_OF(Chunk &chunk, int x, int y, int z) {
   return IS_TB_AT(chunk, nearx, y, z);
 }
 
-inline BiomeKind biome_noise_to_kind_at_point(float height_noise,
-                                              float temp_noise,
+inline BiomeKind biome_noise_to_kind_at_point(float temp_noise,
                                               float rainfall_noise) {
   if (temp_noise > 0.6) {
     // high temperature
@@ -320,11 +319,6 @@ inline BiomeKind biome_noise_to_kind_at_point(float height_noise,
   }
 }
 
-inline float height_noise_at(World &world, int x, int y) {
-  auto actual_noise = world.height_noise.noise(6, x, y);
-  return (actual_noise + 1.0f) / 2.0f;
-}
-
 inline float temperature_noise_at(World &world, int x, int y) {
   return (world.temperature_noise.noise(4, x, y) + 1.0f) / 2.0f;
 }
@@ -333,16 +327,10 @@ inline float rainfall_noise_at(World &world, int x, int y) {
   return (world.rainfall_noise.noise(2, x, y) + 1.0f) / 2.0f;
 }
 
-inline bool is_point_outside_chunk_boundaries(int x, int y) {
-  return x < 0 || x > CHUNK_WIDTH || y < 0 || y > CHUNK_LENGTH;
-}
-
-inline Biome &biome_at_point(World &world, WorldPos pos) {
-  auto height_noise = height_noise_at(world, pos.x, pos.z);
-  auto temp_noise = temperature_noise_at(world, pos.x, pos.z);
-  auto rainfall_noise = rainfall_noise_at(world, pos.x, pos.z);
-  auto kind =
-      biome_noise_to_kind_at_point(height_noise, temp_noise, rainfall_noise);
+inline Biome &biome_at_point(World &world, i32 x, i32 y) {
+  auto temp_noise = temperature_noise_at(world, x, y);
+  auto rainfall_noise = rainfall_noise_at(world, x, y);
+  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
   auto it = world.biomes_by_kind.find(kind);
   if (it == world.biomes_by_kind.end()) {
     logger::error(
@@ -352,26 +340,68 @@ inline Biome &biome_at_point(World &world, WorldPos pos) {
   return it->second;
 }
 
-const char *get_biome_name_at(World &world, WorldPos pos) {
-  const auto &biome = biome_at_point(world, pos);
-  return biome.name;
+inline float blerp(float q11, float q12, float q21, float q22, float x1,
+                   float x2, float y1, float y2, float x, float y) {
+  float x2x1, y2y1, x2x, y2y, yy1, xx1;
+  x2x1 = x2 - x1;
+  y2y1 = y2 - y1;
+  x2x = x2 - x;
+  y2y = y2 - y;
+  yy1 = y - y1;
+  xx1 = x - x1;
+  return 1.0 / (x2x1 * y2y1) *
+         (q11 * x2x * y2y + q21 * xx1 * y2y + q12 * x2x * yy1 +
+          q22 * xx1 * yy1);
 }
 
-inline float noise_for_biome_at_point(World &world, Biome &biome, int x,
-                                      int y) {
-  double frequency = 1.0;
-  const double fx = NOISE_PICTURE_WIDTH / frequency;
-  const double fy = NOISE_PICTURE_WIDTH / frequency;
-  auto &ng = biome.noise;
-  auto noise = ng.noise(8, (float)x / fx, (float)y / fy);
-  return noise;
+// get the height noise for a particular x,y point on the world plane
+inline float height_noise_at(World &world, int x, int y) {
+  // calculate biome noise for the adjacent four points
+
+  u32 oct = 4;
+  u32 distance = 16;
+  float xf = (float)x;
+  float yf = (float)y;
+
+  const i32 x1 = x - distance;
+  float x1f = (float)x1;
+  Biome &leftBiome = biome_at_point(world, x1, y);
+  float leftNoise = leftBiome.noise.noise(oct, x1, y);
+
+  const i32 x2 = x + distance;
+  float x2f = (float)x2;
+  Biome &rightBiome = biome_at_point(world, x2, y);
+  float rightNoise = rightBiome.noise.noise(oct, x2, y);
+
+  const i32 y1 = y - distance;
+  float y1f = (float)y1;
+  Biome &backBiome = biome_at_point(world, x, y1);
+  float backNoise = backBiome.noise.noise(oct, x, y1);
+
+  const i32 y2 = y + distance;
+  float y2f = (float)y2;
+  Biome &frontBiome = biome_at_point(world, x, y2);
+  float frontNoise = frontBiome.noise.noise(oct, x, y2);
+
+  auto actual_noise = blerp(leftNoise, rightNoise, backNoise, frontNoise, x1f,
+                            x2f, y1f, y2f, xf, yf);
+  return (actual_noise + 1.0f) / 2.0f;
+}
+
+inline bool is_point_outside_chunk_boundaries(int x, int y) {
+  return x < 0 || x > CHUNK_WIDTH || y < 0 || y > CHUNK_LENGTH;
+}
+
+const char *get_biome_name_at(World &world, WorldPos pos) {
+  const auto &biome = biome_at_point(world, pos.x, pos.z);
+  return biome.name;
 }
 
 void gen_column_at(World &world, Block *output, int x, int y) {
   auto temp_noise = temperature_noise_at(world, x, y);
   auto rainfall_noise = rainfall_noise_at(world, x, y);
   auto noise = height_noise_at(world, x, y);
-  auto kind = biome_noise_to_kind_at_point(noise, temp_noise, rainfall_noise);
+  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
   auto &bk = world.biomes_by_kind[kind];
   // auto biome_height_noise = bk.noise.fractal(16, x, y);
   int maxHeight = bk.maxHeight;
@@ -573,7 +603,7 @@ void gen_chunk(World &world, Chunk &chunk) {
     for (int y = 0; y < CHUNK_LENGTH; ++y) {
       int global_y = chunk.y + y;
       WorldPos pos{global_x, 0, global_y};
-      auto &biome = biome_at_point(world, pos);
+      auto &biome = biome_at_point(world, pos.x, pos.z);
       switch (biome.kind) {
         case BiomeKind::Forest: {
           build_oak_tree_at(world, chunk, x, y);
@@ -1080,19 +1110,16 @@ void world_dump_heights(World &world, const string &out_dir) {
 
   fmt::print("Done with noise.\n");
   fmt::print("Writing the images into directory at {}...\n", out_dir);
-
   stbi_write_png(fmt::format("{}/heightmap.png", out_dir).c_str(), NM_W, NM_H,
                  4, world_height_map->data(), 0);
   stbi_write_png(fmt::format("{}/rain_map.png", out_dir).c_str(), NM_W, NM_H, 4,
                  whm->data(), 0);
   stbi_write_png(fmt::format("{}/temp_map.png", out_dir).c_str(), NM_W, NM_H, 4,
                  temp_map->data(), 0);
-
   stbi_write_png(fmt::format("{}/biome_kind.png", out_dir).c_str(), NM_W, NM_H,
                  4, biome_kind_map->data(), 0);
   stbi_write_png(fmt::format("{}/ortho.png", out_dir).c_str(), NM_W, NM_H, 4,
                  ortho_view->data(), 0);
-
   fmt::print("Done.\n");
   delete whm;
   delete biome_kind_map;
@@ -1154,7 +1181,7 @@ void init_world(World &world, Seed seed) {
        Biome{
            .kind = BiomeKind::Desert,
            .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.01f, 1.0f, 2.0f, 0.5f, bseed},
+           .noise = OpenSimplexNoiseWParam{0.0025f, 1.0f, 2.0f, 0.5f, bseed},
            .name = "Desert",
        }});
 
@@ -1164,7 +1191,7 @@ void init_world(World &world, Seed seed) {
        Biome{
            .kind = BiomeKind::Forest,
            .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.03f, 1.0f, 2.0f, 0.5f, bseed},
+           .noise = OpenSimplexNoiseWParam{0.004f, 1.0f, 2.0f, 0.5f, bseed},
            .name = "Forest",
        }});
 
@@ -1174,7 +1201,7 @@ void init_world(World &world, Seed seed) {
        Biome{
            .kind = BiomeKind::Grassland,
            .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.025f, 1.0f, 2.0f, 0.5f, bseed},
+           .noise = OpenSimplexNoiseWParam{0.003f, 1.0f, 2.0f, 0.5f, bseed},
            .name = "Grassland",
        }});
 
@@ -1184,7 +1211,7 @@ void init_world(World &world, Seed seed) {
        Biome{
            .kind = BiomeKind::Tundra,
            .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.02f, 1.0f, 2.0f, 0.5f, bseed},
+           .noise = OpenSimplexNoiseWParam{0.002f, 1.0f, 2.0f, 0.5f, bseed},
            .name = "Tundra",
        }});
 
@@ -1194,7 +1221,7 @@ void init_world(World &world, Seed seed) {
        Biome{
            .kind = BiomeKind::Taiga,
            .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.02f, 1.0f, 2.0f, 0.5f, bseed},
+           .noise = OpenSimplexNoiseWParam{0.004f, 1.0f, 2.0f, 0.5f, bseed},
            .name = "Taiga",
        }});
 
@@ -1214,7 +1241,7 @@ void init_world(World &world, Seed seed) {
        Biome{
            .kind = BiomeKind::Mountains,
            .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{1.00f, 1.0f, 2.0f, 0.5f, bseed},
+           .noise = OpenSimplexNoiseWParam{0.1f, 1.0f, 2.0f, 0.5f, bseed},
            .name = "Mountains",
        }});
 }
