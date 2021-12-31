@@ -2,6 +2,7 @@
 #define COMMON_HPP
 
 #include <fmt/core.h>
+#include <fmt/format.h>
 #include <stdint.h>
 
 #include <functional>
@@ -46,9 +47,47 @@ using u32 = uint32_t;
 using u64 = uint64_t;
 
 using glm::ivec3;
+using glm::ivec4;
 using glm::mat4;
 using glm::vec2;
 using glm::vec3;
 using glm::vec4;
+
+template <typename T>
+struct fmt::formatter<glm::tvec4<T>> {
+  using K = glm::tvec4<T>;
+  char presentation = 'f';
+
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    auto it = ctx.begin(), end = ctx.end();
+    if (it != end && (*it == 'f' || *it == 'e')) presentation = *it++;
+    if (it != end && *it != '}') throw format_error("invalid format");
+    return it;
+  }
+
+  template <typename FormatContext>
+  auto format(const K& r, FormatContext& ctx) -> decltype(ctx.out()) {
+    return format_to(ctx.out(), "x={}, y={}, z={}, w={}", (u32)r.r, (u32)r.g,
+                     (u32)r.b, (u32)r.a);
+  }
+};
+
+template <typename T>
+struct fmt::formatter<glm::tvec2<T>> {
+  using K = glm::tvec2<T>;
+  char presentation = 'f';
+
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    auto it = ctx.begin(), end = ctx.end();
+    if (it != end && (*it == 'f' || *it == 'e')) presentation = *it++;
+    if (it != end && *it != '}') throw format_error("invalid format");
+    return it;
+  }
+
+  template <typename FormatContext>
+  auto format(const K& r, FormatContext& ctx) -> decltype(ctx.out()) {
+    return format_to(ctx.out(), "x={}, y={}", (u32)r.r, (u32)r.g);
+  }
+};
 
 #endif

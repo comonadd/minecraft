@@ -1,22 +1,12 @@
 #ifndef IMAGE_HPP
 #define IMAGE_HPP
 
+#include "color.hpp"
 #include "common.hpp"
 #include "logger.hpp"
 #include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
 #include "util.hpp"
-
-struct Color {
-  byte r;
-  byte g;
-  byte b;
-  byte a;
-};
-
-inline Color rgba_color(byte r, byte g, byte b, byte a) {
-  return Color{.r = r, .g = g, .b = b, .a = a};
-}
 
 using Pixel = Color;
 
@@ -24,10 +14,13 @@ struct Image {
   u32 width = 0;
   u32 height = 0;
   Pixel* data = nullptr;
-  Pixel& operator()(u32 x, u32 y) { return *(this->data + x + this->width * y); }
+  Pixel& operator()(u32 x, u32 y) {
+    return *(this->data + x + this->width * y);
+  }
   Pixel& set(u32 x, u32 y, Pixel& val) { this->operator()(x, y) = val; }
 
-  Image(u32 width, u32 height, Pixel* _data) : width(width), height(height), data(_data) {}
+  Image(u32 width, u32 height, Pixel* _data)
+      : width(width), height(height), data(_data) {}
   Image(u32 width, u32 height) : width(width), height(height) {
     this->data = new Pixel[width * height];
   }
