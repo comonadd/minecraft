@@ -87,23 +87,29 @@ using ChunkId = pair<int, int>;
 inline ChunkId chunk_id_from_coords(int x, int y) { return make_pair(x, y); }
 
 enum BiomeKind {
-  Grassland = 0,
-  Mountains = 1,
-  Desert = 2,
-  Ocean = 3,
-  Tundra = 4,
-  Taiga = 5,
-  Forest = 6
+  Grassland,
+  Mountains,
+  Desert,
+  Ocean,
+  Tundra,
+  Taiga,
+  Forest,
+  Coast,
+  Count,
 };
+
+struct World;
 
 struct Biome {
   BiomeKind kind;
   int maxHeight;
   OpenSimplexNoiseWParam noise;
+  float treeFrequency;
+  std::function<void(World& world, Chunk& chunk, i32 x, i32 y)> treeGen;
   const char* name;
 };
 
-const int WATER_LEVEL = 50;
+const int WATER_LEVEL = (int)(CHUNK_HEIGHT * 0.25);
 const int TICKS_PER_SECOND = 100;
 
 // in ticks (12 minutes)
@@ -134,7 +140,7 @@ struct World {
   inline float tree_noise() { return this->_tree_gen(this->eng); }
 
   // SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
-  OpenSimplexNoiseWParam height_noise{0.001f, 64.0f, 2.0f, 0.6f, 345972};
+  OpenSimplexNoiseWParam height_noise{0.00025f, 64.0f, 2.0f, 0.6f, 345972};
 
   // TODO: Use different seed
   OpenSimplexNoiseWParam rainfall_noise{0.0005f, 2.0f, 3.0f, 0.5f, 834952};

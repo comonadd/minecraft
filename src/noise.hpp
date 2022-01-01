@@ -23,6 +23,10 @@ class OpenSimplexNoiseWParam {
         frequency(_frequency),
         amplitude(_amplitude) {}
 
+  inline float noise(u32 octaves, int x, int y) {
+    return this->noise(octaves, (float)x, (float)y);
+  }
+
   float noise(u32 octaves, float x, float y) {
     float amp = this->amplitude;
     float res = 0.0f;

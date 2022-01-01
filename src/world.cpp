@@ -85,7 +85,11 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
     } break;
 
     case BiomeKind::Ocean: {
-      return BlockType::Water;
+      return BlockType::Sand;
+    } break;
+
+    case BiomeKind::Coast: {
+      return BlockType::Sand;
     } break;
 
     case BiomeKind::Forest: {
@@ -285,8 +289,42 @@ inline bool IS_TB_LEFT_OF(Chunk &chunk, int x, int y, int z) {
   return IS_TB_AT(chunk, nearx, y, z);
 }
 
-inline BiomeKind biome_noise_to_kind_at_point(float temp_noise,
-                                              float rainfall_noise) {
+inline bool IS_TB_TOP_OF(Chunk &chunk, int x, int y, int z) {
+  const auto nearz = min(H - 1, z + 1);
+  if (nearz == H - 1) return true;
+  return IS_TB_AT(chunk, x, y, nearz);
+}
+
+inline bool IS_TB_BOTTOM_OF(Chunk &chunk, int x, int y, int z) {
+  const auto nearz = max(0, z - 1);
+  if (nearz == 0) return true;
+  return IS_TB_AT(chunk, x, y, nearz);
+}
+
+struct PointBiomeNoise {
+  float height_noise;
+  float rainfall_noise;
+  float temp_noise;
+};
+
+inline BiomeKind biome_noise_to_kind_at_point(PointBiomeNoise bn) {
+  auto temp_noise = bn.temp_noise;
+  auto rainfall_noise = bn.rainfall_noise;
+  auto height_noise = bn.height_noise;
+
+  if (height_noise > 0.75) {
+    return BiomeKind::Mountains;
+  }
+
+  if (height_noise < 0.4) {
+    return BiomeKind::Ocean;
+  }
+
+  // coast near the ocean
+  if (height_noise < 0.45) {
+    return BiomeKind::Coast;
+  }
+
   if (temp_noise > 0.6) {
     // high temperature
     if (rainfall_noise > 0.5) {
@@ -327,10 +365,20 @@ inline float rainfall_noise_at(World &world, int x, int y) {
   return (world.rainfall_noise.noise(2, x, y) + 1.0f) / 2.0f;
 }
 
+inline float simple_height_noise_at(World &world, i32 x, i32 y) {
+  return (world.height_noise.noise(2, x, y) + 1.0f) / 2.0f;
+}
+
 inline Biome &biome_at_point(World &world, i32 x, i32 y) {
+  auto height_noise = simple_height_noise_at(world, x, y);
   auto temp_noise = temperature_noise_at(world, x, y);
   auto rainfall_noise = rainfall_noise_at(world, x, y);
-  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+  PointBiomeNoise bn{
+      .height_noise = height_noise,
+      .rainfall_noise = rainfall_noise,
+      .temp_noise = temp_noise,
+  };
+  auto kind = biome_noise_to_kind_at_point(bn);
   auto it = world.biomes_by_kind.find(kind);
   if (it == world.biomes_by_kind.end()) {
     logger::error(
@@ -355,7 +403,7 @@ inline float blerp(float q11, float q12, float q21, float q22, float x1,
 }
 
 // get the height noise for a particular x,y point on the world plane
-inline float height_noise_at(World &world, int x, int y) {
+inline float height_noise_at_blerp(World &world, int x, int y) {
   // calculate biome noise for the adjacent four points
 
   u32 oct = 4;
@@ -388,6 +436,73 @@ inline float height_noise_at(World &world, int x, int y) {
   return (actual_noise + 1.0f) / 2.0f;
 }
 
+inline float biome_influence_at_point(Biome const &biome, int x, int y,
+                                      PointBiomeNoise bn) {
+  switch (biome.kind) {
+    case BiomeKind::Grassland: {
+      return bn.height_noise * 0.2f + bn.rainfall_noise * 0.4f +
+             bn.temp_noise * 0.4f;
+    } break;
+    case BiomeKind::Mountains: {
+      return bn.height_noise * 0.8f + bn.rainfall_noise * 0.1f +
+             bn.temp_noise * 0.1f;
+    } break;
+    case BiomeKind::Desert: {
+      return bn.height_noise * 0.2f + bn.rainfall_noise * 0.1f +
+             bn.temp_noise * 0.7f;
+    } break;
+    case BiomeKind::Tundra: {
+      return bn.height_noise * 0.5f + bn.rainfall_noise * 0.3f +
+             bn.temp_noise * 0.2f;
+    } break;
+    case BiomeKind::Taiga: {
+      return bn.height_noise * 0.4f + bn.rainfall_noise * 0.4f +
+             bn.temp_noise * 0.2f;
+    } break;
+    case BiomeKind::Forest: {
+      return bn.height_noise * 0.3f + bn.rainfall_noise * 0.3f +
+             bn.temp_noise * 0.4f;
+    } break;
+    case BiomeKind::Ocean: {
+      return bn.height_noise * 0.1f + bn.rainfall_noise * 0.4f +
+             bn.temp_noise * 0.5f;
+    } break;
+    case BiomeKind::Coast: {
+      return bn.height_noise * 0.1f + bn.rainfall_noise * 0.4f +
+             bn.temp_noise * 0.5f;
+    } break;
+    default: {
+      return 0.0f;
+    } break;
+  }
+}
+
+// get the height noise for a particular x,y point on the world plane
+inline u32 height_noise_at(World &world, int x, int y, PointBiomeNoise bn) {
+  float actual_noise = 0.0f;
+  u32 oct = 4;
+
+  float total_weight = 0.0f;
+
+  u32 biomes_amount = BiomeKind::Count;
+  for (auto i = 0; i < biomes_amount; ++i) {
+    auto bk = (BiomeKind)i;
+    auto &biome = world.biomes_by_kind[bk];
+    float biome_noise = (biome.noise.noise(oct, x, y) + 1.0f) / 2.0f;
+    float weight = biome_influence_at_point(biome, x, y, bn);
+    // fmt::print("biome influence {} at {}, {} = {}\n", bk, x, y, weight);
+    total_weight += weight;
+    auto pn = biome_noise * weight * 1.8f;
+    // fmt::print("pn={}\n", pn);
+    actual_noise += pn * biome.maxHeight;
+  }
+  float total = actual_noise / total_weight;
+  // auto noise = (total + 1.0f) / 2.0f;
+  // fmt::print("height={}\n", total);
+
+  return (u32)total;
+}
+
 inline bool is_point_outside_chunk_boundaries(int x, int y) {
   return x < 0 || x > CHUNK_WIDTH || y < 0 || y > CHUNK_LENGTH;
 }
@@ -398,14 +513,19 @@ const char *get_biome_name_at(World &world, WorldPos pos) {
 }
 
 void gen_column_at(World &world, Block *output, int x, int y) {
+  auto height_noise = simple_height_noise_at(world, x, y);
   auto temp_noise = temperature_noise_at(world, x, y);
   auto rainfall_noise = rainfall_noise_at(world, x, y);
-  auto noise = height_noise_at(world, x, y);
-  auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+  PointBiomeNoise bn{.height_noise = height_noise,
+                     .rainfall_noise = rainfall_noise,
+                     .temp_noise = temp_noise};
+  auto kind = biome_noise_to_kind_at_point(bn);
   auto &bk = world.biomes_by_kind[kind];
   // auto biome_height_noise = bk.noise.fractal(16, x, y);
-  int maxHeight = bk.maxHeight;
-  int columnHeight = noise * (float)maxHeight;
+  // int maxHeight = bk.maxHeight;
+  // int columnHeight = noise * (float)maxHeight;
+  auto noise = height_noise_at(world, x, y, bn);
+  int columnHeight = noise;
   for (int height = columnHeight - 1; height >= 0; --height) {
     Block block;
     block.type = block_type_for_height(bk, height, columnHeight - 1);
@@ -441,67 +561,59 @@ bool can_tree_grow_on(BlockType bt) {
 void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
   auto col = &CHUNK_COL_AT(chunk, x, y);
   auto topBlockHeight = get_col_height(col);
-  if (!can_tree_grow_on(col[topBlockHeight].type)) {
-    return;
+  // start building a tree
+  auto height =
+      map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT, world.tree_noise());
+  auto treeTopHeight = topBlockHeight + height;
+  auto h = topBlockHeight;
+  // stump
+  for (; h < treeTopHeight; ++h) {
+    col[h].type = BlockType::Wood;
   }
-  auto r = world.tree_noise();
-  auto has_tree_center_here = r < 0.02;
-  if (has_tree_center_here) {
-    // start building a tree
-    auto height =
-        map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT, world.tree_noise());
-    auto treeTopHeight = topBlockHeight + height;
-    auto h = topBlockHeight;
-    // stump
-    for (; h < treeTopHeight; ++h) {
-      col[h].type = BlockType::Wood;
-    }
-    // crown
-    auto bottomRadius = round(
-        map(0.0f, 1.0f, TREE_MIN_RADIUS, TREE_MAX_RADIUS, world.tree_noise()));
-    u32 crownHeight = round(map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT,
-                                world.tree_noise()));
-    u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
-    u32 crownTop = crownBottom + crownHeight;
-    for (; crownBottom <= crownTop; ++crownBottom) {
-      auto radius = bottomRadius;
-      auto radius2 = radius * radius;
-      auto startX = x - radius;
-      auto startY = y - radius;
-      auto endX = x + radius;
-      auto endY = y + radius;
-      for (int cx = startX; cx <= endX; ++cx) {
-        for (int cy = startY; cy <= endY; ++cy) {
-          if (cx == x && cy == y && crownBottom < treeTopHeight) {
-            // don't replace the wood
-            // TODO: Just place wood after the crown
-            continue;
-          }
-          auto isOutsideChunkBoundaries =
-              is_point_outside_chunk_boundaries(cx, cy);
-          if (isOutsideChunkBoundaries) {
-            // TODO: Transfer this information to the chunk to be
-            // rendered with this block through some global state.
-          } else {
-            // append the block
-            // the further from the center, the less likely to have
-            // leaves here
-            // minus one because we don't count the middle
-            i32 dx = abs(cx - x) - 1;
-            i32 dy = abs(cy - y) - 1;
-            u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
-            float distanceFromCenterProp =
-                (float)distanceFromCenter2 / (float)radius2;
-            // k is the base chance of leaves appearing on the edge
-            float k = -0.05;
-            float unlikelinessOfHavingLeavesBasedOnRadius =
-                max(0.0f, distanceFromCenterProp - k);
-            float noise = world.tree_noise();
-            auto needBlockHere =
-                noise > unlikelinessOfHavingLeavesBasedOnRadius;
-            if (needBlockHere) {
-              CHUNK_AT(chunk, cx, cy, crownBottom).type = BlockType::Leaves;
-            }
+  // crown
+  auto bottomRadius = round(
+      map(0.0f, 1.0f, TREE_MIN_RADIUS, TREE_MAX_RADIUS, world.tree_noise()));
+  u32 crownHeight = round(
+      map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT, world.tree_noise()));
+  u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
+  u32 crownTop = crownBottom + crownHeight;
+  for (; crownBottom <= crownTop; ++crownBottom) {
+    auto radius = bottomRadius;
+    auto radius2 = radius * radius;
+    auto startX = x - radius;
+    auto startY = y - radius;
+    auto endX = x + radius;
+    auto endY = y + radius;
+    for (int cx = startX; cx <= endX; ++cx) {
+      for (int cy = startY; cy <= endY; ++cy) {
+        if (cx == x && cy == y && crownBottom < treeTopHeight) {
+          // don't replace the wood
+          // TODO: Just place wood after the crown
+          continue;
+        }
+        auto isOutsideChunkBoundaries =
+            is_point_outside_chunk_boundaries(cx, cy);
+        if (isOutsideChunkBoundaries) {
+          // TODO: Transfer this information to the chunk to be
+          // rendered with this block through some global state.
+        } else {
+          // append the block
+          // the further from the center, the less likely to have
+          // leaves here
+          // minus one because we don't count the middle
+          i32 dx = abs(cx - x) - 1;
+          i32 dy = abs(cy - y) - 1;
+          u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
+          float distanceFromCenterProp =
+              (float)distanceFromCenter2 / (float)radius2;
+          // k is the base chance of leaves appearing on the edge
+          float k = -0.05;
+          float unlikelinessOfHavingLeavesBasedOnRadius =
+              max(0.0f, distanceFromCenterProp - k);
+          float noise = world.tree_noise();
+          auto needBlockHere = noise > unlikelinessOfHavingLeavesBasedOnRadius;
+          if (needBlockHere) {
+            CHUNK_AT(chunk, cx, cy, crownBottom).type = BlockType::Leaves;
           }
         }
       }
@@ -512,74 +624,67 @@ void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
 void build_pine_tree_at(World &world, Chunk &chunk, int x, int y) {
   auto col = &CHUNK_COL_AT(chunk, x, y);
   auto topBlockHeight = get_col_height(col);
-  if (!can_tree_grow_on(col[topBlockHeight].type)) {
-    return;
+  // start building a tree
+  auto height = map(0.0f, 1.0f, MIN_PINE_TREE_HEIGHT, MAX_PINE_TREE_HEIGHT,
+                    world.tree_noise());
+  auto treeTopHeight = topBlockHeight + height;
+  auto h = topBlockHeight;
+  // stump
+  for (; h < treeTopHeight; ++h) {
+    col[h].type = BlockType::PineWood;
   }
-  auto r = world.tree_noise();
-  auto has_tree_center_here = r < 0.02;
-  if (has_tree_center_here) {
-    // start building a tree
-    auto height = map(0.0f, 1.0f, MIN_PINE_TREE_HEIGHT, MAX_PINE_TREE_HEIGHT,
-                      world.tree_noise());
-    auto treeTopHeight = topBlockHeight + height;
-    auto h = topBlockHeight;
-    // stump
-    for (; h < treeTopHeight; ++h) {
-      col[h].type = BlockType::PineWood;
-    }
-    // crown
-    auto maxRadius = round(map(0.0f, 1.0f, PINE_TREE_MIN_RADIUS,
-                               PINE_TREE_MAX_RADIUS, world.tree_noise()));
-    u32 crownHeight = round(map(0.0f, 1.0f, PINE_CROWN_MIN_HEIGHT,
-                                PINE_CROWN_MAX_HEIGHT, world.tree_noise()));
-    u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
-    u32 crownTop = crownBottom + crownHeight;
-    auto radiusMax2 = maxRadius * maxRadius;
-    for (; crownBottom <= crownTop; ++crownBottom) {
-      auto even = crownBottom % 2 == 0;
-      auto radius = even ? maxRadius : PINE_TREE_MIN_RADIUS;
-      auto startX = x - radius;
-      auto startY = y - radius;
-      auto endX = x + radius;
-      auto endY = y + radius;
-      for (int cx = startX; cx <= endX; ++cx) {
-        for (int cy = startY; cy <= endY; ++cy) {
-          if (cx == x && cy == y && crownBottom < treeTopHeight) {
-            // don't replace the wood
-            // TODO: Just place wood after the crown
-            continue;
-          }
-          auto isOutsideChunkBoundaries =
-              is_point_outside_chunk_boundaries(cx, cy);
-          if (isOutsideChunkBoundaries) {
-            // TODO: Transfer this information to the chunk to be
-            // rendered with this block through some global state.
-          } else {
-            // append the block
-            // the further from the center, the less likely to have
-            // leaves here
-            // minus one because we don't count the middle
-            i32 dx = abs(cx - x) - 1;
-            i32 dy = abs(cy - y) - 1;
-            u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
-            float distanceFromCenterProp =
-                (float)distanceFromCenter2 / (float)radiusMax2;
-            // k is the base chance of leaves appearing on the edge
-            float k = 0.35f;
-            float unlikelinessOfHavingLeavesBasedOnRadius =
-                max(0.0f, distanceFromCenterProp - k);
-            // how high are we, 0.0 - 1.0
-            float howHigh = (float)crownBottom / (float)crownTop;
-            float hp = howHigh * 0.45f;
-            // float unlikelinessOfHavingLeaves = hp;
-            float unlikelinessOfHavingLeaves =
-                unlikelinessOfHavingLeavesBasedOnRadius + hp;
-            float noise = world.tree_noise();
-            auto needBlockHere = noise > unlikelinessOfHavingLeaves;
-            if (needBlockHere) {
-              CHUNK_AT(chunk, cx, cy, crownBottom).type =
-                  BlockType::PineTreeLeaves;
-            }
+  // crown
+  auto maxRadius = round(map(0.0f, 1.0f, PINE_TREE_MIN_RADIUS,
+                             PINE_TREE_MAX_RADIUS, world.tree_noise()));
+  u32 crownHeight = round(map(0.0f, 1.0f, PINE_CROWN_MIN_HEIGHT,
+                              PINE_CROWN_MAX_HEIGHT, world.tree_noise()));
+  u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
+  u32 crownTop = crownBottom + crownHeight;
+  auto radiusMax2 = maxRadius * maxRadius;
+  for (; crownBottom <= crownTop; ++crownBottom) {
+    auto even = crownBottom % 2 == 0;
+    auto radius = even ? maxRadius : PINE_TREE_MIN_RADIUS;
+    auto startX = x - radius;
+    auto startY = y - radius;
+    auto endX = x + radius;
+    auto endY = y + radius;
+    for (int cx = startX; cx <= endX; ++cx) {
+      for (int cy = startY; cy <= endY; ++cy) {
+        if (cx == x && cy == y && crownBottom < treeTopHeight) {
+          // don't replace the wood
+          // TODO: Just place wood after the crown
+          continue;
+        }
+        auto isOutsideChunkBoundaries =
+            is_point_outside_chunk_boundaries(cx, cy);
+        if (isOutsideChunkBoundaries) {
+          // TODO: Transfer this information to the chunk to be
+          // rendered with this block through some global state.
+        } else {
+          // append the block
+          // the further from the center, the less likely to have
+          // leaves here
+          // minus one because we don't count the middle
+          i32 dx = abs(cx - x) - 1;
+          i32 dy = abs(cy - y) - 1;
+          u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
+          float distanceFromCenterProp =
+              (float)distanceFromCenter2 / (float)radiusMax2;
+          // k is the base chance of leaves appearing on the edge
+          float k = 0.35f;
+          float unlikelinessOfHavingLeavesBasedOnRadius =
+              max(0.0f, distanceFromCenterProp - k);
+          // how high are we, 0.0 - 1.0
+          float howHigh = (float)crownBottom / (float)crownTop;
+          float hp = howHigh * 0.45f;
+          // float unlikelinessOfHavingLeaves = hp;
+          float unlikelinessOfHavingLeaves =
+              unlikelinessOfHavingLeavesBasedOnRadius + hp;
+          float noise = world.tree_noise();
+          auto needBlockHere = noise > unlikelinessOfHavingLeaves;
+          if (needBlockHere) {
+            CHUNK_AT(chunk, cx, cy, crownBottom).type =
+                BlockType::PineTreeLeaves;
           }
         }
       }
@@ -603,18 +708,16 @@ void gen_chunk(World &world, Chunk &chunk) {
     for (int y = 0; y < CHUNK_LENGTH; ++y) {
       int global_y = chunk.y + y;
       WorldPos pos{global_x, 0, global_y};
-      auto &biome = biome_at_point(world, pos.x, pos.z);
-      switch (biome.kind) {
-        case BiomeKind::Forest: {
-          build_oak_tree_at(world, chunk, x, y);
-          continue;
-        } break;
-        case BiomeKind::Taiga: {
-          build_pine_tree_at(world, chunk, x, y);
-          continue;
-        } break;
-        default: {
-        } break;
+      auto &biome = biome_at_point(world, global_x, global_y);
+      auto col = &CHUNK_COL_AT(chunk, x, y);
+      auto topBlockHeight = get_col_height(col);
+      if (!can_tree_grow_on(col[topBlockHeight].type)) {
+        continue;
+      }
+      float r = world.tree_noise();
+      auto has_tree_center_here = r < biome.treeFrequency;
+      if (has_tree_center_here) {
+        biome.treeGen(world, chunk, x, y);
       }
     }
   }
@@ -703,8 +806,8 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
         int right = IS_TB_RIGHT_OF(chunk, x, y, height);
         int front = IS_TB_FRONT_OF(chunk, x, y, height);
         int back = IS_TB_BACK_OF(chunk, x, y, height);
-        int top = IS_TB(CHUNK_AT(chunk, x, y, min(H - 1, height + 1)));
-        int bottom = IS_TB(CHUNK_AT(chunk, x, y, max(0, height - 1)));
+        int top = IS_TB_TOP_OF(chunk, x, y, height);
+        int bottom = IS_TB_BOTTOM_OF(chunk, x, y, height);
 
         int wleft = 0;
         int wright = 0;
@@ -830,7 +933,6 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
 
   for (auto it = world.loaded_chunks.begin();
        it != world.loaded_chunks.end();) {
-    auto chunk_key = it->first;
     auto chunkp = it->second;
 
     if (chunkp == nullptr) {
@@ -1080,9 +1182,15 @@ void world_dump_heights(World &world, const string &out_dir) {
         (*temp_map)[x][y] = rgba_color(byte(r), byte(g), byte(b), byte(a));
       }
 
-      auto kind = biome_noise_to_kind_at_point(temp_noise, rainfall_noise);
+      auto height_noise = simple_height_noise_at(world, x, y);
+      PointBiomeNoise bn{
+          .height_noise = height_noise,
+          .rainfall_noise = rainfall_noise,
+          .temp_noise = temp_noise,
+      };
+      auto kind = biome_noise_to_kind_at_point(bn);
       auto &bk = world.biomes_by_kind[kind];
-      auto noise = height_noise_at(world, x, y);
+      auto noise = height_noise_at(world, x, y, bn);
 
       // biome kind
       {
@@ -1180,8 +1288,10 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Desert,
        Biome{
            .kind = BiomeKind::Desert,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.0025f, 1.0f, 2.0f, 0.5f, bseed},
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.68),
+           .noise = OpenSimplexNoiseWParam{0.00002f, 0.5f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.0f,
+           .treeGen = build_oak_tree_at,
            .name = "Desert",
        }});
 
@@ -1190,8 +1300,10 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Forest,
        Biome{
            .kind = BiomeKind::Forest,
-           .maxHeight = CHUNK_HEIGHT,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.88),
            .noise = OpenSimplexNoiseWParam{0.004f, 1.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.035f,
+           .treeGen = build_oak_tree_at,
            .name = "Forest",
        }});
 
@@ -1200,8 +1312,10 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Grassland,
        Biome{
            .kind = BiomeKind::Grassland,
-           .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.003f, 1.0f, 2.0f, 0.5f, bseed},
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.75),
+           .noise = OpenSimplexNoiseWParam{0.00001f, 1.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.0012f,
+           .treeGen = build_oak_tree_at,
            .name = "Grassland",
        }});
 
@@ -1210,8 +1324,10 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Tundra,
        Biome{
            .kind = BiomeKind::Tundra,
-           .maxHeight = CHUNK_HEIGHT,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.8),
            .noise = OpenSimplexNoiseWParam{0.002f, 1.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.001f,
+           .treeGen = build_pine_tree_at,
            .name = "Tundra",
        }});
 
@@ -1220,8 +1336,10 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Taiga,
        Biome{
            .kind = BiomeKind::Taiga,
-           .maxHeight = CHUNK_HEIGHT,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.8),
            .noise = OpenSimplexNoiseWParam{0.004f, 1.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.25f,
+           .treeGen = build_pine_tree_at,
            .name = "Taiga",
        }});
 
@@ -1230,9 +1348,23 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Ocean,
        Biome{
            .kind = BiomeKind::Ocean,
-           .maxHeight = WATER_LEVEL,
+           .maxHeight = (int)(WATER_LEVEL * 0.8),
            .noise = OpenSimplexNoiseWParam{0.001f, 1.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.0f,
+           .treeGen = build_oak_tree_at,
            .name = "Ocean",
+       }});
+
+  // Coast
+  world.biomes_by_kind.insert(
+      {BiomeKind::Coast,
+       Biome{
+           .kind = BiomeKind::Coast,
+           .maxHeight = WATER_LEVEL + 3,
+           .noise = OpenSimplexNoiseWParam{0.001f, 1.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.000001f,
+           .treeGen = build_oak_tree_at,
+           .name = "Coast",
        }});
 
   // Mountains
@@ -1241,7 +1373,9 @@ void init_world(World &world, Seed seed) {
        Biome{
            .kind = BiomeKind::Mountains,
            .maxHeight = CHUNK_HEIGHT,
-           .noise = OpenSimplexNoiseWParam{0.1f, 1.0f, 2.0f, 0.5f, bseed},
+           .noise = OpenSimplexNoiseWParam{0.001f, 64.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.002f,
+           .treeGen = build_oak_tree_at,
            .name = "Mountains",
        }});
 }

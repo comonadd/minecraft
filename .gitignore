@@ -9,3 +9,4 @@ temp/
 imgui.ini
 *.prof*
 massif*
+worldgen_dump
