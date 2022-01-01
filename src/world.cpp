@@ -101,8 +101,19 @@ inline BlockType block_type_for_height(Biome &bk, int height, int maxHeight) {
         return BlockType::Stone;
       }
     } break;
+
+    case BiomeKind::Jungle: {
+      if (height == maxHeight) {
+        return BlockType::JungleTopGrass;
+      } else if (height > (top - 20)) {
+        return BlockType::Dirt;
+      } else if (height >= 0) {
+        return BlockType::Stone;
+      }
+    } break;
+
     default:
-      return BlockType::Snow;
+      return BlockType::Unknown;
   }
 
   return BlockType::Unknown;
@@ -136,11 +147,13 @@ inline Block chunk_get_block_at_global(Chunk *chunk, WorldPos pos) {
 
 static set<BlockType> complex_bt_textures = {
     //
-    BlockType::TopGrass,  //
-    BlockType::Wood,      //
-    BlockType::PineWood,  //
-    BlockType::TopSnow,
-    //
+    BlockType::TopGrass,        //
+    BlockType::Wood,            //
+    BlockType::PineWood,        //
+    BlockType::TopSnow,         //
+    BlockType::JungleWood,      //
+    BlockType::JungleTopGrass,  //
+                                //
 };
 
 bool bt_is_complex(BlockType bt) {
@@ -330,7 +343,7 @@ inline BiomeKind biome_noise_to_kind_at_point(PointBiomeNoise bn) {
     if (rainfall_noise > 0.5) {
       // high temp, high rainfall
       // needs to be jungle
-      return BiomeKind::Desert;
+      return BiomeKind::Jungle;
     } else {
       // high temp, low rainfall
       return BiomeKind::Desert;
@@ -553,6 +566,8 @@ bool can_tree_grow_on(BlockType bt) {
       return true;
     case BlockType::TopSnow:
       return true;
+    case BlockType::JungleTopGrass:
+      return true;
     default:
       return false;
   }
@@ -616,6 +631,77 @@ void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
             CHUNK_AT(chunk, cx, cy, crownBottom).type = BlockType::Leaves;
           }
         }
+      }
+    }
+  }
+}
+
+void build_jungle_tree(World &world, Chunk &chunk, int x, int y) {
+  auto col = &CHUNK_COL_AT(chunk, x, y);
+  auto topBlockHeight = get_col_height(col);
+  // start building a tree
+  auto height = map(0.0f, 1.0f, MIN_JUNGLE_TREE_HEIGHT, MAX_JUNGLE_TREE_HEIGHT,
+                    world.tree_noise());
+  auto treeTopHeight = topBlockHeight + height;
+  auto h = topBlockHeight;
+
+  // crown
+  auto bottomRadius = round(map(0.0f, 1.0f, JUNGLE_TREE_MIN_RADIUS,
+                                JUNGLE_TREE_MAX_RADIUS, world.tree_noise()));
+  u32 crownHeight = round(
+      map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT, world.tree_noise()));
+  u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
+  u32 crownTop = crownBottom + crownHeight;
+  for (; crownBottom <= crownTop; ++crownBottom) {
+    auto radius = bottomRadius;
+    auto radius2 = radius * radius;
+    auto startX = x - radius;
+    auto startY = y - radius;
+    auto endX = x + radius;
+    auto endY = y + radius;
+    for (int cx = startX; cx <= endX; ++cx) {
+      for (int cy = startY; cy <= endY; ++cy) {
+        auto isOutsideChunkBoundaries =
+            is_point_outside_chunk_boundaries(cx, cy);
+        if (isOutsideChunkBoundaries) {
+          // TODO: Transfer this information to the chunk to be
+          // rendered with this block through some global state.
+        } else {
+          // append the block
+          // the further from the center, the less likely to have
+          // leaves here
+          // minus one because we don't count the middle
+          i32 dx = abs(cx - x) - 1;
+          i32 dy = abs(cy - y) - 1;
+          u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
+          float distanceFromCenterProp =
+              (float)distanceFromCenter2 / (float)radius2;
+          // k is the base chance of leaves appearing on the edge
+          float k = -0.05;
+          float unlikelinessOfHavingLeavesBasedOnRadius =
+              max(0.0f, distanceFromCenterProp - k);
+          float noise = world.tree_noise();
+          auto needBlockHere = noise > unlikelinessOfHavingLeavesBasedOnRadius;
+          if (needBlockHere) {
+            CHUNK_AT(chunk, cx, cy, crownBottom).type =
+                BlockType::JungleTreeLeaves;
+          }
+        }
+      }
+    }
+  }
+
+  // stump
+  auto TREE_STUMP_RADIUS = 2;
+  auto initialH = h;
+  for (int xx = x; xx < x + TREE_STUMP_RADIUS; ++xx) {
+    for (int yy = y; yy < y + TREE_STUMP_RADIUS; ++yy) {
+      for (auto h = initialH; h < treeTopHeight; ++h) {
+        auto isOutsideChunkBoundaries =
+            is_point_outside_chunk_boundaries(xx, yy);
+        if (isOutsideChunkBoundaries) continue;
+        auto coll = &CHUNK_COL_AT(chunk, xx, yy);
+        coll[h].type = BlockType::JungleWood;
       }
     }
   }
@@ -1305,6 +1391,18 @@ void init_world(World &world, Seed seed) {
            .treeFrequency = 0.035f,
            .treeGen = build_oak_tree_at,
            .name = "Forest",
+       }});
+
+  // Jungle
+  world.biomes_by_kind.insert(
+      {BiomeKind::Jungle,
+       Biome{
+           .kind = BiomeKind::Jungle,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.84),
+           .noise = OpenSimplexNoiseWParam{0.01f, 1.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.065f,
+           .treeGen = build_jungle_tree,
+           .name = "Jungle",
        }});
 
   // Grassland

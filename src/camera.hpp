@@ -8,7 +8,7 @@ struct Camera {
   float yaw = -90.0f;
   float pitch = 0.0f;
   float sensitivity = 0.1f;
-  glm::vec3 camera_pos = glm::vec3(4.0, 50.0, 50.0);
+  glm::vec3 camera_pos = glm::vec3(4.0, 100.0, 50.0);
   glm::vec3 camera_front = glm::vec3(0.0, 0.0, -1.0f);
   glm::vec3 camera_up = glm::vec3(0.0, 0.1, 0.0);
   float lastX;

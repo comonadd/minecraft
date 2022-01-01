@@ -18,11 +18,14 @@ enum class BlockType : u8 {
 
   Leaves = TCOORD(112, 0),
   PineTreeLeaves = TCOORD(128, 0),
+  JungleTreeLeaves = TCOORD(128 + 16, 0),
 
   TopGrass = TCOORD(0, 208),
   Wood = TCOORD(16, 208),
   TopSnow = TCOORD(32, 208),
   PineWood = TCOORD(48, 208),
+  JungleWood = TCOORD(64, 208),
+  JungleTopGrass = TCOORD(80, 208),
 
   Unknown
 };

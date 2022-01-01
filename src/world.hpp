@@ -32,6 +32,13 @@ constexpr u32 CROWN_MAX_HEIGHT = 5;
 constexpr u32 TREE_MIN_RADIUS = 2;
 constexpr u32 TREE_MAX_RADIUS = 4;
 
+constexpr u32 MAX_JUNGLE_TREE_HEIGHT = 20;
+constexpr u32 MIN_JUNGLE_TREE_HEIGHT = 2;
+constexpr u32 JUNGLE_TREE_MIN_RADIUS = 4;
+constexpr u32 JUNGLE_TREE_MAX_RADIUS = 6;
+constexpr u32 JUNGLE_CROWN_MAX_HEIGHT = 6;
+constexpr u32 JUNGLE_CROWN_MIN_HEIGHT = 2;
+
 // pine tree
 constexpr u32 MIN_PINE_TREE_HEIGHT = 8;
 constexpr u32 MAX_PINE_TREE_HEIGHT = 16;
@@ -95,6 +102,7 @@ enum BiomeKind {
   Taiga,
   Forest,
   Coast,
+  Jungle,
   Count,
 };
 
