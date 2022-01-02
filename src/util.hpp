@@ -49,4 +49,10 @@ inline glm::vec3 no_color() {
   return {1.0f, 0.0f, 1.0f};
 }
 
+std::string FormatTime(std::chrono::system_clock::time_point tp);
+
+inline std::string CurrentTimeStr() {
+  return FormatTime(std::chrono::system_clock::now());
+}
+
 #endif
