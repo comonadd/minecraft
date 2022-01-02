@@ -71,8 +71,27 @@ struct fmt::formatter<glm::tvec4<T>> {
 
   template <typename FormatContext>
   auto format(const K& r, FormatContext& ctx) -> decltype(ctx.out()) {
-    return format_to(ctx.out(), "x={}, y={}, z={}, w={}", (u32)r.r, (u32)r.g,
-                     (u32)r.b, (u32)r.a);
+    return format_to(ctx.out(), "x={}, y={}, z={}, w={}", (i32)r.r, (i32)r.g,
+                     (i32)r.b, (i32)r.a);
+  }
+};
+
+template <typename T>
+struct fmt::formatter<glm::tvec3<T>> {
+  using K = glm::tvec3<T>;
+  char presentation = 'f';
+
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    auto it = ctx.begin(), end = ctx.end();
+    if (it != end && (*it == 'f' || *it == 'e')) presentation = *it++;
+    if (it != end && *it != '}') throw format_error("invalid format");
+    return it;
+  }
+
+  template <typename FormatContext>
+  auto format(const K& r, FormatContext& ctx) -> decltype(ctx.out()) {
+    return format_to(ctx.out(), "x={}, y={}, z={}", (i32)r.x, (i32)r.y,
+                     (i32)r.z);
   }
 };
 
@@ -90,7 +109,7 @@ struct fmt::formatter<glm::tvec2<T>> {
 
   template <typename FormatContext>
   auto format(const K& r, FormatContext& ctx) -> decltype(ctx.out()) {
-    return format_to(ctx.out(), "x={}, y={}", (u32)r.r, (u32)r.g);
+    return format_to(ctx.out(), "x={}, y={}", (i32)r.r, (i32)r.g);
   }
 };
 
