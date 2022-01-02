@@ -525,6 +525,59 @@ const char *get_biome_name_at(World &world, WorldPos pos) {
   return biome.name;
 }
 
+inline WorldPos chunk_local_to_global_pos(Chunk &chunk, i32 x, i32 y, i32 z) {
+  return WorldPos(x + chunk.x, y + chunk.y, z);
+}
+
+i32 proper_mod(i32 a, i32 b) { return (b + (a % b)) % b; }
+
+// Find the chunk position for world coordinates
+ChunkId chunk_pos_for_coords(WorldPos pos) {
+  i32 x = pos.x - proper_mod((i32)pos.x, (i32)CHUNK_WIDTH);
+  i32 y = pos.y - proper_mod((i32)pos.y, (i32)CHUNK_LENGTH);
+  return ChunkId{x, y};
+}
+
+Chunk *find_chunk_with_pos(World &world, WorldPos pos) {
+  auto id = chunk_pos_for_coords(pos);
+  auto chunk = world.loaded_chunks.find(id);
+  if (chunk == world.loaded_chunks.end()) return nullptr;
+  return chunk->second;
+}
+
+inline ChunkId chunk_id(Chunk &chunk) {
+  return chunk_id_from_coords(chunk.x, chunk.y);
+}
+
+inline bool make_chunk_dirty_if_exists_at(World &world, ChunkId id) {
+  auto chunk = world.loaded_chunks.find(id);
+  if (chunk == world.loaded_chunks.end()) return false;
+  chunk->second->is_dirty = true;
+  return true;
+}
+
+inline void world_add_chunk_meta(World &world, Chunk &chunk, ChunkPos lpos,
+                                 BlockType block) {
+  WorldPos gpos{lpos.x + chunk.x, lpos.y + chunk.y, lpos.z};
+  auto id = chunk_pos_for_coords(gpos);
+  ChunkPos lpos_new{gpos.x - id.first, gpos.y - id.second, gpos.z};
+  Mod mod{
+      .pos = lpos_new,
+      .block = block,
+  };
+  world.meta[id].push_back(mod);
+}
+
+inline void chunk_place_block(World &world, Chunk &chunk, i32 x, i32 y, i32 z,
+                              BlockType block) {
+  auto isOutsideChunkBoundaries = is_point_outside_chunk_boundaries(x, y);
+  if (isOutsideChunkBoundaries) {
+    world_add_chunk_meta(world, chunk, {x, y, z}, block);
+  } else {
+    CHUNK_AT(chunk, x, y, z).type = block;
+  }
+}
+
 void gen_column_at(World &world, Block *output, int x, int y) {
   auto height_noise = simple_height_noise_at(world, x, y);
   auto temp_noise = temperature_noise_at(world, x, y);
@@ -578,20 +631,17 @@ void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
   auto topBlockHeight = get_col_height(col);
   // start building a tree
   auto height =
-      map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT, world.tree_noise());
+      map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT, world.tree_noise(x, y));
   auto treeTopHeight = topBlockHeight + height;
   auto h = topBlockHeight;
-  // stump
-  for (; h < treeTopHeight; ++h) {
-    col[h].type = BlockType::Wood;
-  }
   // crown
-  auto bottomRadius = round(
-      map(0.0f, 1.0f, TREE_MIN_RADIUS, TREE_MAX_RADIUS, world.tree_noise()));
-  u32 crownHeight = round(
-      map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT, world.tree_noise()));
+  auto bottomRadius = round(map(0.0f, 1.0f, TREE_MIN_RADIUS, TREE_MAX_RADIUS,
+                                world.tree_noise(x, y)));
+  u32 crownHeight = round(map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT,
+                              world.tree_noise(x, y)));
   u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
   u32 crownTop = crownBottom + crownHeight;
+
   for (; crownBottom <= crownTop; ++crownBottom) {
     auto radius = bottomRadius;
     auto radius2 = radius * radius;
@@ -601,11 +651,6 @@ void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
     auto endY = y + radius;
     for (int cx = startX; cx <= endX; ++cx) {
       for (int cy = startY; cy <= endY; ++cy) {
-        if (cx == x && cy == y && crownBottom < treeTopHeight) {
-          // don't replace the wood
-          // TODO: Just place wood after the crown
-          continue;
-        }
         auto isOutsideChunkBoundaries =
             is_point_outside_chunk_boundaries(cx, cy);
         if (isOutsideChunkBoundaries) {
@@ -625,14 +670,20 @@ void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
           float k = -0.05;
           float unlikelinessOfHavingLeavesBasedOnRadius =
               max(0.0f, distanceFromCenterProp - k);
-          float noise = world.tree_noise();
+          float noise = world.tree_noise(cx, cy);
           auto needBlockHere = noise > unlikelinessOfHavingLeavesBasedOnRadius;
           if (needBlockHere) {
-            CHUNK_AT(chunk, cx, cy, crownBottom).type = BlockType::Leaves;
+            chunk_place_block(world, chunk, cx, cy, crownBottom,
+                              BlockType::Leaves);
           }
         }
       }
     }
+  }
+
+  // stump
+  for (; h < treeTopHeight; ++h) {
+    chunk_place_block(world, chunk, x, y, h, BlockType::Wood);
   }
 }
 
@@ -641,15 +692,16 @@ void build_jungle_tree(World &world, Chunk &chunk, int x, int y) {
   auto topBlockHeight = get_col_height(col);
   // start building a tree
   auto height = map(0.0f, 1.0f, MIN_JUNGLE_TREE_HEIGHT, MAX_JUNGLE_TREE_HEIGHT,
-                    world.tree_noise());
+                    world.tree_noise(x, y));
   auto treeTopHeight = topBlockHeight + height;
   auto h = topBlockHeight;
 
   // crown
-  auto bottomRadius = round(map(0.0f, 1.0f, JUNGLE_TREE_MIN_RADIUS,
-                                JUNGLE_TREE_MAX_RADIUS, world.tree_noise()));
-  u32 crownHeight = round(
-      map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT, world.tree_noise()));
+  auto bottomRadius =
+      round(map(0.0f, 1.0f, JUNGLE_TREE_MIN_RADIUS, JUNGLE_TREE_MAX_RADIUS,
+                world.tree_noise(x, y)));
+  u32 crownHeight = round(map(0.0f, 1.0f, JUNGLE_CROWN_MIN_HEIGHT,
+                              JUNGLE_CROWN_MAX_HEIGHT, world.tree_noise(x, y)));
   u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
   u32 crownTop = crownBottom + crownHeight;
   for (; crownBottom <= crownTop; ++crownBottom) {
@@ -661,31 +713,24 @@ void build_jungle_tree(World &world, Chunk &chunk, int x, int y) {
     auto endY = y + radius;
     for (int cx = startX; cx <= endX; ++cx) {
       for (int cy = startY; cy <= endY; ++cy) {
-        auto isOutsideChunkBoundaries =
-            is_point_outside_chunk_boundaries(cx, cy);
-        if (isOutsideChunkBoundaries) {
-          // TODO: Transfer this information to the chunk to be
-          // rendered with this block through some global state.
-        } else {
-          // append the block
-          // the further from the center, the less likely to have
-          // leaves here
-          // minus one because we don't count the middle
-          i32 dx = abs(cx - x) - 1;
-          i32 dy = abs(cy - y) - 1;
-          u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
-          float distanceFromCenterProp =
-              (float)distanceFromCenter2 / (float)radius2;
-          // k is the base chance of leaves appearing on the edge
-          float k = -0.05;
-          float unlikelinessOfHavingLeavesBasedOnRadius =
-              max(0.0f, distanceFromCenterProp - k);
-          float noise = world.tree_noise();
-          auto needBlockHere = noise > unlikelinessOfHavingLeavesBasedOnRadius;
-          if (needBlockHere) {
-            CHUNK_AT(chunk, cx, cy, crownBottom).type =
-                BlockType::JungleTreeLeaves;
-          }
+        // append the block
+        // the further from the center, the less likely to have
+        // leaves here
+        // minus one because we don't count the middle
+        i32 dx = abs(cx - x) - 1;
+        i32 dy = abs(cy - y) - 1;
+        u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
+        float distanceFromCenterProp =
+            (float)distanceFromCenter2 / (float)radius2;
+        // k is the base chance of leaves appearing on the edge
+        float k = -0.05;
+        float unlikelinessOfHavingLeavesBasedOnRadius =
+            max(0.0f, distanceFromCenterProp - k);
+        float noise = world.tree_noise(cx, cy);
+        auto needBlockHere = noise > unlikelinessOfHavingLeavesBasedOnRadius;
+        if (needBlockHere) {
+          chunk_place_block(world, chunk, cx, cy, crownBottom,
+                            BlockType::JungleTreeLeaves);
         }
       }
     }
@@ -697,11 +742,7 @@ void build_jungle_tree(World &world, Chunk &chunk, int x, int y) {
   for (int xx = x; xx < x + TREE_STUMP_RADIUS; ++xx) {
     for (int yy = y; yy < y + TREE_STUMP_RADIUS; ++yy) {
       for (auto h = initialH; h < treeTopHeight; ++h) {
-        auto isOutsideChunkBoundaries =
-            is_point_outside_chunk_boundaries(xx, yy);
-        if (isOutsideChunkBoundaries) continue;
-        auto coll = &CHUNK_COL_AT(chunk, xx, yy);
-        coll[h].type = BlockType::JungleWood;
+        chunk_place_block(world, chunk, xx, yy, h, BlockType::JungleWood);
       }
     }
   }
@@ -712,18 +753,14 @@ void build_pine_tree_at(World &world, Chunk &chunk, int x, int y) {
   auto topBlockHeight = get_col_height(col);
   // start building a tree
   auto height = map(0.0f, 1.0f, MIN_PINE_TREE_HEIGHT, MAX_PINE_TREE_HEIGHT,
-                    world.tree_noise());
+                    world.tree_noise(x, y));
   auto treeTopHeight = topBlockHeight + height;
   auto h = topBlockHeight;
-  // stump
-  for (; h < treeTopHeight; ++h) {
-    col[h].type = BlockType::PineWood;
-  }
   // crown
   auto maxRadius = round(map(0.0f, 1.0f, PINE_TREE_MIN_RADIUS,
-                             PINE_TREE_MAX_RADIUS, world.tree_noise()));
+                             PINE_TREE_MAX_RADIUS, world.tree_noise(x, y)));
   u32 crownHeight = round(map(0.0f, 1.0f, PINE_CROWN_MIN_HEIGHT,
-                              PINE_CROWN_MAX_HEIGHT, world.tree_noise()));
+                              PINE_CROWN_MAX_HEIGHT, world.tree_noise(x, y)));
   u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
   u32 crownTop = crownBottom + crownHeight;
   auto radiusMax2 = maxRadius * maxRadius;
@@ -736,46 +773,47 @@ void build_pine_tree_at(World &world, Chunk &chunk, int x, int y) {
     auto endY = y + radius;
     for (int cx = startX; cx <= endX; ++cx) {
       for (int cy = startY; cy <= endY; ++cy) {
-        if (cx == x && cy == y && crownBottom < treeTopHeight) {
-          // don't replace the wood
-          // TODO: Just place wood after the crown
-          continue;
-        }
-        auto isOutsideChunkBoundaries =
-            is_point_outside_chunk_boundaries(cx, cy);
-        if (isOutsideChunkBoundaries) {
-          // TODO: Transfer this information to the chunk to be
-          // rendered with this block through some global state.
-        } else {
-          // append the block
-          // the further from the center, the less likely to have
-          // leaves here
-          // minus one because we don't count the middle
-          i32 dx = abs(cx - x) - 1;
-          i32 dy = abs(cy - y) - 1;
-          u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
-          float distanceFromCenterProp =
-              (float)distanceFromCenter2 / (float)radiusMax2;
-          // k is the base chance of leaves appearing on the edge
-          float k = 0.35f;
-          float unlikelinessOfHavingLeavesBasedOnRadius =
-              max(0.0f, distanceFromCenterProp - k);
-          // how high are we, 0.0 - 1.0
-          float howHigh = (float)crownBottom / (float)crownTop;
-          float hp = howHigh * 0.45f;
-          // float unlikelinessOfHavingLeaves = hp;
-          float unlikelinessOfHavingLeaves =
-              unlikelinessOfHavingLeavesBasedOnRadius + hp;
-          float noise = world.tree_noise();
-          auto needBlockHere = noise > unlikelinessOfHavingLeaves;
-          if (needBlockHere) {
-            CHUNK_AT(chunk, cx, cy, crownBottom).type =
-                BlockType::PineTreeLeaves;
-          }
+        // append the block
+        // the further from the center, the less likely to have
+        // leaves here
+        // minus one because we don't count the middle
+        i32 dx = abs(cx - x) - 1;
+        i32 dy = abs(cy - y) - 1;
+        u32 distanceFromCenter2 = abs(dx * dx + dy * dy);
+        float distanceFromCenterProp =
+            (float)distanceFromCenter2 / (float)radiusMax2;
+        // k is the base chance of leaves appearing on the edge
+        float k = 0.35f;
+        float unlikelinessOfHavingLeavesBasedOnRadius =
+            max(0.0f, distanceFromCenterProp - k);
+        // how high are we, 0.0 - 1.0
+        float howHigh = (float)crownBottom / (float)crownTop;
+        float hp = howHigh * 0.45f;
+        // float unlikelinessOfHavingLeaves = hp;
+        float unlikelinessOfHavingLeaves =
+            unlikelinessOfHavingLeavesBasedOnRadius + hp;
+        float noise = world.tree_noise(cx, cy);
+        auto needBlockHere = noise > unlikelinessOfHavingLeaves;
+        if (needBlockHere) {
+          chunk_place_block(world, chunk, cx, cy, crownBottom,
+                            BlockType::PineTreeLeaves);
         }
       }
     }
   }
+  // stump
+  for (; h < treeTopHeight; ++h) {
+    chunk_place_block(world, chunk, x, y, h, BlockType::PineWood);
+  }
+}
+
+optional<ChunkMetaMod const *> get_meta_stuff_for_chunk(World &world,
+                                                        Chunk &chunk) {
+  auto it = world.meta.find(chunk_id(chunk));
+  if (it == world.meta.end()) {
+    return {};
+  }
+  return &it->second;
 }
 
 // Generates the height map and block types
@@ -800,7 +838,8 @@ void gen_chunk(World &world, Chunk &chunk) {
       if (!can_tree_grow_on(col[topBlockHeight].type)) {
         continue;
       }
-      float r = world.tree_noise();
+      world.tree_gen_seed(x, y);
+      float r = world.tree_noise(x, y);
       auto has_tree_center_here = r < biome.treeFrequency;
       if (has_tree_center_here) {
         biome.treeGen(world, chunk, x, y);
@@ -808,6 +847,17 @@ void gen_chunk(World &world, Chunk &chunk) {
     }
   }
 
+  // meta stuff
+  if (auto stuff = get_meta_stuff_for_chunk(world, chunk)) {
+    auto &modifList = **stuff;
+    for (auto &modif : modifList) {
+      auto &pos = modif.pos;
+      CHUNK_AT(chunk, pos.x, pos.y, pos.z).type = modif.block;
+    }
+  }
+
+  // apply changes last
+  // TODO: Do this locally
   for (auto &atom : world.changes) {
     auto pos = atom.pos;
     auto ch = &chunk;
@@ -1042,17 +1092,6 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
   }
 }
 
-// Find the loaded chunk which contains the specified position
-Chunk *find_chunk_with_pos(World &world, WorldPos pos) {
-  Chunk *chunk = nullptr;
-  for (auto &ch : world.chunks) {
-    auto pos_inside = (pos.x > ch->x && pos.x < ch->x + CHUNK_WIDTH) &&
-                      (pos.y > ch->y && pos.y < ch->y + CHUNK_LENGTH);
-    if (pos_inside) chunk = ch;
-  }
-  return chunk;
-}
-
 void chunk_modify_block_at_global(World &world, Chunk *chunk, WorldPos pos,
                                   BlockType type) {
   fmt::print("Modified block at {},{},{}\n", pos.x, pos.y, pos.z);
@@ -1120,7 +1159,7 @@ void load_chunks_around_player(World &world, WorldPos center_pos,
         world.loaded_chunks.insert(
             {chunk_id_from_coords(chunk_x, chunk_y), loaded_ch});
       } else if (loaded_ch->is_dirty) {
-        fmt::print("Chunk is dirty, reloading mesh...\n");
+        logger::debug("Chunk is dirty, reloading mesh...");
         load_chunk_at(world, chunk_x, chunk_y, *loaded_ch);
       } else {
         // no need to regenerate

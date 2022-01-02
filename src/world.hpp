@@ -90,7 +90,17 @@ struct hash_pair {
   }
 };
 
-using ChunkId = pair<int, int>;
+struct hash_tvec3 {
+  template <class T>
+  size_t operator()(const glm::tvec3<T>& p) const {
+    auto hash1 = hash<T>{}(p.x);
+    auto hash2 = hash<T>{}(p.y);
+    auto hash3 = hash<T>{}(p.z);
+    return hash1 ^ hash2;
+  }
+};
+
+using ChunkId = pair<i32, i32>;
 inline ChunkId chunk_id_from_coords(int x, int y) { return make_pair(x, y); }
 
 enum BiomeKind {
@@ -134,6 +144,16 @@ struct Atom {
   Block block;
 };
 
+using ChunkPos = WorldPos;
+
+struct Mod {
+  ChunkPos pos;
+  BlockType block;
+};
+
+using ChunkMetaMod = vector<Mod>;
+using MetaMod = unordered_map<ChunkId, ChunkMetaMod, hash_pair>;
+
 struct World {
   int seed = 3849534;
   std::vector<Chunk*> chunks{};
@@ -141,11 +161,22 @@ struct World {
 
   std::vector<Atom> changes;
 
+  // Contains changes made by the worldgen algorithm that need to be applied
+  // after chunk generation in order to complete the structure inside of a
+  // particular chunk
+  MetaMod meta;
+
   std::random_device rd;
   std::default_random_engine eng;
   std::uniform_real_distribution<float> _tree_gen{FLOAT_MIN, FLOAT_MAX};
+  OpenSimplexNoiseWParam _tree_noise{0.025f, 64.0f, 2.0f, 0.6f, 345972};
 
-  inline float tree_noise() { return this->_tree_gen(this->eng); }
+  inline void tree_gen_seed(i32 x, i32 y) { this->eng.seed(x ^ y); }
+
+  inline float tree_noise(i32 x, i32 y) {
+    //    return (this->_tree_noise.noise(1, x, y) + 1.0f) / 2.0f;
+    return this->_tree_gen(this->eng);
+  }
 
   // SimplexNoise height_noise{0.005f, 1.0f, 2.0f, 0.5f};
   OpenSimplexNoiseWParam height_noise{0.00025f, 64.0f, 2.0f, 0.6f, 345972};

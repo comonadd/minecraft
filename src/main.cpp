@@ -49,6 +49,10 @@ enum class Mode {
   Menu = 1,
 };
 
+struct ChunkBorderVertex {
+  vec3 pos;
+};
+
 struct {
   // Main window state
   GLFWwindow *window = nullptr;
@@ -89,6 +93,11 @@ struct {
 
   // sun/moon size
   float celestial_size = 2.5f;
+
+  bool render_chunk_borders = true;
+  GLuint chunk_borders_buffer;
+  vector<ChunkBorderVertex> chunk_borders_mesh;
+  GLuint chunk_borders_vao;
 } state;
 
 inline glm::vec3 get_block_pos_looking_at() {  //
@@ -378,11 +387,34 @@ void render_clouds() {
   }
 }
 
+void render_chunk_borders() {
+  if (auto shader = shader_storage::get_shader("line")) {
+    glUseProgram(shader->id);
+    auto attr = shader->attr;
+    // MV
+    glm::mat4 View =
+        glm::lookAt(state.camera.camera_pos,
+                    state.camera.camera_pos + state.camera.camera_front,
+                    state.camera.camera_up);
+    glm::mat4 mvp = state.Projection * View;
+    glBindVertexArray(state.chunk_borders_vao);
+    glUniformMatrix4fv(attr.MVP, 1, GL_FALSE, &mvp[0][0]);
+    glBindBuffer(GL_ARRAY_BUFFER, state.chunk_borders_buffer);
+    glDrawArrays(GL_LINES, 0, state.chunk_borders_mesh.size());
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    glUseProgram(0);
+  }
+}
+
 void render() {
   render_sky();
   render_clouds();
   render_celestial();
   render_world();
+  if (state.render_chunk_borders) {
+    render_chunk_borders();
+  }
 
   ImGui_ImplOpenGL3_NewFrame();
   ImGui_ImplGlfw_NewFrame();
@@ -441,6 +473,32 @@ void update() {
                  state.camera.camera_pos.z};
 
   world_update(state.world, state.delta_time);
+
+  if (state.render_chunk_borders) {
+    auto &mesh = state.chunk_borders_mesh;
+    mesh.clear();
+    for (auto &chp : state.world.chunks) {
+      auto &chunk = *chp;
+      mesh.push_back(ChunkBorderVertex{vec3(chunk.x, 0, chunk.y)});
+      mesh.push_back(ChunkBorderVertex{vec3(chunk.x, CHUNK_HEIGHT, chunk.y)});
+    }
+
+    if (auto shader = shader_storage::get_shader("line")) {
+      auto attr = shader->attr;
+      glBindVertexArray(state.chunk_borders_vao);
+      auto psize = sizeof(state.chunk_borders_mesh[0]);
+      auto s = psize * state.chunk_borders_mesh.size();
+      auto stride = psize;
+      glBindBuffer(GL_ARRAY_BUFFER, state.chunk_borders_buffer);
+      glBufferData(GL_ARRAY_BUFFER, s, state.chunk_borders_mesh.data(),
+                   GL_STATIC_DRAW);
+      glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
+                            (void *)offsetof(SkyVertexData, pos));
+      glEnableVertexAttribArray(attr.position);
+      glBindVertexArray(0);
+      glBindBuffer(GL_ARRAY_BUFFER, 0);
+    }
+  }
 
   // clouds
   auto ct = state.world.time;
@@ -697,6 +755,21 @@ void load_shaders() {
           glGenBuffers(1, &state.cloud_buffer);
           glBindVertexArray(state.cloud_vao);
           glBindBuffer(GL_ARRAY_BUFFER, state.cloud_buffer);
+        }
+      });
+
+  shader_storage::load_shader(
+      "line", "./shaders/line_vs.glsl", "./shaders/line_fs.glsl",
+      [&](Shader &shader) -> void {
+        Attrib attr;
+        attr.position = glGetAttribLocation(shader.id, "position");
+        attr.MVP = glGetUniformLocation(shader.id, "mvp");
+        shader.attr = attr;
+        {
+          glGenVertexArrays(1, &state.chunk_borders_vao);
+          glGenBuffers(1, &state.chunk_borders_buffer);
+          glBindVertexArray(state.chunk_borders_vao);
+          glBindBuffer(GL_ARRAY_BUFFER, state.chunk_borders_buffer);
         }
       });
 }
