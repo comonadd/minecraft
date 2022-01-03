@@ -65,6 +65,9 @@ using ChunkMesh = std::vector<VertexData>;
 struct Chunk {
   Block blocks[CHUNK_LENGTH][CHUNK_WIDTH][CHUNK_HEIGHT];
   uint32_t height = 0;
+  ChunkMesh* mesh;
+
+  bool is_being_generated = true;
 
   int x;
   int y;
@@ -159,6 +162,9 @@ struct World {
   std::vector<Chunk*> chunks{};
   std::unordered_map<ChunkId, Chunk*, hash_pair> loaded_chunks;
 
+  std::vector<pair<ChunkId, Chunk*>> chunks_to_unload;
+  std::mutex chunk_unload_mutex;
+
   std::vector<Atom> changes;
 
   // Contains changes made by the worldgen algorithm that need to be applied
@@ -224,6 +230,14 @@ void unload_distant_chunks(World& world, WorldPos pos, u32 rendering_distance);
 void init_world(World& world);
 optional<Block> get_block_at_global_pos(World& world, WorldPos pos);
 void init_world(World& world, Seed seed);
-void world_update(World& world, float dt);
+void world_update(World& world, float dt, WorldPos player_pos,
+                  u32 rendering_distance);
+inline void for_all_chunks_in_rd(World& world, function<void(Chunk&)> fun) {
+  for (auto& chunk : world.chunks) {
+    if (chunk == nullptr) continue;
+    if (chunk->is_being_generated) continue;
+    fun(*chunk);
+  }
+}
 
 #endif

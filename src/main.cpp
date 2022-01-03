@@ -53,6 +53,8 @@ struct ChunkBorderVertex {
   vec3 pos;
 };
 
+using std::thread;
+
 struct {
   // Main window state
   GLFWwindow *window = nullptr;
@@ -98,6 +100,9 @@ struct {
   GLuint chunk_borders_buffer;
   vector<ChunkBorderVertex> chunk_borders_mesh;
   GLuint chunk_borders_vao;
+
+  // thread responsible for world gen
+  thread *gen_thread = nullptr;
 } state;
 
 inline glm::vec3 get_block_pos_looking_at() {  //
@@ -187,9 +192,9 @@ void render_info_bar() {
   ImGui::Text("Total memory usage: %f MB", round(mem_usage_kb / 1024.0F));
   ImGui::Text("Render distance: %i", state.rendering_distance);
   int total_vertices = 0;
-  for (auto &chunk : state.world.chunks) {
-    total_vertices += chunk->mesh_size;
-  }
+  for_all_chunks_in_rd(state.world, [&](Chunk &chunk) {
+    total_vertices += chunk.mesh_size;  //
+  });
   ImGui::Text("Vertices to render: %i", total_vertices);
   ImGui::Text("World time: %lu", state.world.time);
   ImGui::Text("Time of day (ticks): %i", state.world.time_of_day);
@@ -215,6 +220,19 @@ void render_info_bar() {
   ImGui::End();
 }
 
+inline u32 chunks_for_rdf(u32 rdf) {
+  return 4 * rdf * rdf;  //
+}
+
+void change_rendering_distance(u32 new_rdf) {
+  state.rendering_distance = new_rdf;
+  auto n = chunks_for_rdf(new_rdf);
+  state.world.chunks.resize(n);
+  for (u32 i = 0; i < state.world.chunks.size(); ++i) {
+    state.world.chunks[i] = nullptr;
+  }
+}
+
 void render_menu() {
   ImGui::Begin("Game menu");
 
@@ -222,7 +240,10 @@ void render_menu() {
   ImGui::Text("Rendering distance");
   float rdf = (float)state.rendering_distance;
   ImGui::SliderFloat("rendering_distance", &rdf, 0.0f, 32.0f);
-  state.rendering_distance = round(rdf);
+  auto new_rdf = round(rdf);
+  if (new_rdf != state.rendering_distance) {
+    change_rendering_distance(new_rdf);
+  }
 
   // fog density
   ImGui::Text("Fog density");
@@ -263,12 +284,12 @@ void render_world() {
         glUniform1f(block_attrib.fog_gradient, state.world.fog_gradient);
       }
 
-      for (auto &chunk : state.world.chunks) {
-        glBindVertexArray(chunk->vao);
+      for_all_chunks_in_rd(state.world, [&](Chunk &chunk) {
+        glBindVertexArray(chunk.vao);
         // render the chunk mesh
-        glDrawArrays(GL_TRIANGLES, 0, chunk->mesh_size);
+        glDrawArrays(GL_TRIANGLES, 0, chunk.mesh_size);
         glBindVertexArray(0);
-      }
+      });
       glUseProgram(0);
     }
   }
@@ -472,31 +493,95 @@ void update() {
       glm::ivec3{state.camera.camera_pos.x, state.camera.camera_pos.y,
                  state.camera.camera_pos.z};
 
-  world_update(state.world, state.delta_time);
+  // Only allocate a new buffer if none was allocated before
+  auto shader = shader_storage::get_shader("block");
+  for_all_chunks_in_rd(state.world, [&](Chunk &chunk) {
+    auto &mesh = chunk.mesh;
+
+    if (!chunk.is_dirty) return;
+
+    auto block_attrib = shader->attr;
+    //  if (chunk.vao == 0) {
+    // Configure the VAO
+    glGenVertexArrays(1, &chunk.vao);
+    glGenBuffers(1, &chunk.buffer);
+#ifdef VAO_ALLOCATION
+    fmt::print("Allocating VAO={}\n", chunk.vao);
+#endif
+    //  }
+    glBindVertexArray(chunk.vao);
+
+    // Update chunk buffer mesh data
+    glBindBuffer(GL_ARRAY_BUFFER, chunk.buffer);
+    // so update the chunk buffer
+    auto mesh_size = sizeof((*mesh)[0]) * mesh->size();
+    auto *meshp = mesh->data();
+    chunk.mesh_size = mesh->size();
+    glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);
+
+    // Update VAO settings
+    GLsizei stride = sizeof(VertexData);
+    glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, pos));
+    glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, normal));
+    glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
+                          (void *)offsetof(VertexData, uv));
+    // glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
+    //                       (void *)offsetof(VertexData, ao));
+    // glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
+    //                       (void *)offsetof(VertexData, light));
+    glEnableVertexAttribArray(block_attrib.position);
+    glEnableVertexAttribArray(block_attrib.normal);
+    glEnableVertexAttribArray(block_attrib.uv);
+    // glEnableVertexAttribArray(block_attrib.ao);
+    // glEnableVertexAttribArray(block_attrib.light);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    glBindVertexArray(0);
+    glDeleteBuffers(1, &chunk.buffer);
+
+    // we've regenerated the chunk mesh
+    chunk.is_dirty = false;
+
+    delete mesh;
+  });
+
+  // Unload unused chunks
+  {
+    std::lock_guard<std::mutex> guard(state.world.chunk_unload_mutex);
+    while (state.world.chunks_to_unload.size() > 0) {
+      auto [key, chunkp] = state.world.chunks_to_unload.back();
+      unload_chunk(chunkp);
+      state.world.loaded_chunks.erase(key);
+      state.world.chunks_to_unload.pop_back();
+    }
+  }
 
   if (state.render_chunk_borders) {
     auto &mesh = state.chunk_borders_mesh;
     mesh.clear();
-    for (auto &chp : state.world.chunks) {
-      auto &chunk = *chp;
+    for_all_chunks_in_rd(state.world, [&](Chunk &chunk) {
       mesh.push_back(ChunkBorderVertex{vec3(chunk.x, 0, chunk.y)});
       mesh.push_back(ChunkBorderVertex{vec3(chunk.x, CHUNK_HEIGHT, chunk.y)});
-    }
-
-    if (auto shader = shader_storage::get_shader("line")) {
-      auto attr = shader->attr;
-      glBindVertexArray(state.chunk_borders_vao);
-      auto psize = sizeof(state.chunk_borders_mesh[0]);
-      auto s = psize * state.chunk_borders_mesh.size();
-      auto stride = psize;
-      glBindBuffer(GL_ARRAY_BUFFER, state.chunk_borders_buffer);
-      glBufferData(GL_ARRAY_BUFFER, s, state.chunk_borders_mesh.data(),
-                   GL_STATIC_DRAW);
-      glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
-                            (void *)offsetof(SkyVertexData, pos));
-      glEnableVertexAttribArray(attr.position);
-      glBindVertexArray(0);
-      glBindBuffer(GL_ARRAY_BUFFER, 0);
+    });
+    if (mesh.size() != 0) {
+      if (auto shader = shader_storage::get_shader("line")) {
+        auto attr = shader->attr;
+        glBindVertexArray(state.chunk_borders_vao);
+        auto psize = sizeof(state.chunk_borders_mesh[0]);
+        auto s = psize * state.chunk_borders_mesh.size();
+        auto stride = psize;
+        glBindBuffer(GL_ARRAY_BUFFER, state.chunk_borders_buffer);
+        glBufferData(GL_ARRAY_BUFFER, s, state.chunk_borders_mesh.data(),
+                     GL_STATIC_DRAW);
+        glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
+                              (void *) offsetof(SkyVertexData, pos));
+        glEnableVertexAttribArray(attr.position);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+      }
     }
   }
 
@@ -520,13 +605,6 @@ void update() {
   // Calculate the minimap image
   // calculate_minimap_tex(state.minimap_tex, state.world, state.player_pos,
   //                       state.rendering_distance);
-
-  if (state.mode == Mode::Playing) {
-    load_chunks_around_player(state.world, state.camera.camera_pos,
-                              state.rendering_distance);
-    unload_distant_chunks(state.world, state.player_pos,
-                          state.rendering_distance);
-  }
 
   process_keys();
 }
@@ -787,8 +865,9 @@ Seed DEFAULT_SEED = 2873947234821;
 int main(int argc, char **argv) {
   cxxopts::Options options("Minecraft",
                            "Procedurally generated voxel world simulation");
-  options.add_options()                                                       //
-      ("g,gen", "Generate worldgen images and exit", cxxopts::value<bool>())  //
+  options.add_options()  //
+      ("g,gen", "Generate worldgen images and exit",
+       cxxopts::value<bool>())  //
       ("o,gen-out", "Worldgen output directory",
        cxxopts::value<string>()->default_value(DEFAULT_OUT_DIR))  //
       ("s,seed", "Worldgen seed",
@@ -828,6 +907,19 @@ int main(int argc, char **argv) {
   }
 
   glfwShowWindow(state.window);
+
+  // initial resize
+  change_rendering_distance(state.rendering_distance);
+
+  if (state.mode == Mode::Playing) {
+    state.gen_thread = new thread{[&]() -> void {
+      while (!glfwWindowShouldClose(window)) {
+        world_update(state.world, state.delta_time, state.player_pos,
+                     state.rendering_distance);
+        sleep(1);
+      }
+    }};
+  }
 
   while (!glfwWindowShouldClose(window)) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

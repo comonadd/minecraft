@@ -498,7 +498,7 @@ inline u32 height_noise_at(World &world, int x, int y, PointBiomeNoise bn) {
   float total_weight = 0.0f;
 
   u32 biomes_amount = BiomeKind::Count;
-  for (auto i = 0; i < biomes_amount; ++i) {
+  for (u32 i = 0; i < biomes_amount; ++i) {
     auto bk = (BiomeKind)i;
     auto &biome = world.biomes_by_kind[bk];
     float biome_noise = (biome.noise.noise(oct, x, y) + 1.0f) / 2.0f;
@@ -911,11 +911,14 @@ void occlusion(char neighbors[27], char lights[27], float shades[27],
 }
 
 void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
+  fmt::print("Loading chunk at {}\n", vec2(chunk_x, chunk_y));
+  chunk.is_being_generated = true;
   auto *mesh = new ChunkMesh();
 
   // fmt::print("Loading chunk at {}, {}\n", chunk_x, chunk_y);
   chunk.x = chunk_x;
   chunk.y = chunk_y;
+  chunk.mesh = mesh;
 
   // Determine the height map
   gen_chunk(world, chunk);
@@ -991,54 +994,8 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
     }
   }
 
-  // Only allocate a new buffer if none was allocated before
-  auto shader = shader_storage::get_shader("block");
-  auto block_attrib = shader->attr;
-  //  if (chunk.vao == 0) {
-  // Configure the VAO
-  glGenVertexArrays(1, &chunk.vao);
-  glGenBuffers(1, &chunk.buffer);
-#ifdef VAO_ALLOCATION
-  fmt::print("Allocating VAO={}\n", chunk.vao);
-#endif
-  //  }
-  glBindVertexArray(chunk.vao);
-
-  // Update chunk buffer mesh data
-  glBindBuffer(GL_ARRAY_BUFFER, chunk.buffer);
-  // so update the chunk buffer
-  auto mesh_size = sizeof((*mesh)[0]) * mesh->size();
-  auto *meshp = mesh->data();
-  chunk.mesh_size = mesh->size();
-  glBufferData(GL_ARRAY_BUFFER, mesh_size, meshp, GL_STATIC_DRAW);
-
-  // Update VAO settings
-  GLsizei stride = sizeof(VertexData);
-  glVertexAttribPointer(block_attrib.position, 3, GL_FLOAT, GL_FALSE, stride,
-                        (void *)offsetof(VertexData, pos));
-  glVertexAttribPointer(block_attrib.normal, 3, GL_FLOAT, GL_FALSE, stride,
-                        (void *)offsetof(VertexData, normal));
-  glVertexAttribPointer(block_attrib.uv, 2, GL_FLOAT, GL_FALSE, stride,
-                        (void *)offsetof(VertexData, uv));
-  // glVertexAttribPointer(block_attrib.ao, 1, GL_FLOAT, GL_FALSE, stride,
-  //                       (void *)offsetof(VertexData, ao));
-  // glVertexAttribPointer(block_attrib.light, 1, GL_FLOAT, GL_FALSE, stride,
-  //                       (void *)offsetof(VertexData, light));
-  glEnableVertexAttribArray(block_attrib.position);
-  glEnableVertexAttribArray(block_attrib.normal);
-  glEnableVertexAttribArray(block_attrib.uv);
-  // glEnableVertexAttribArray(block_attrib.ao);
-  // glEnableVertexAttribArray(block_attrib.light);
-
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-  glBindVertexArray(0);
-  glDeleteBuffers(1, &chunk.buffer);
-
-  // we've regenerated the chunk mesh
-  chunk.is_dirty = false;
-
-  delete mesh;
+  chunk.is_dirty = true;
+  chunk.is_being_generated = false;
 }
 
 void unload_chunk(Chunk *chunk) {
@@ -1064,15 +1021,15 @@ inline u32 distance_to_chunk(WorldPos pos, Chunk *chunk) {
 }
 
 void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
+  std::lock_guard<std::mutex> guard(world.chunk_unload_mutex);
   int center_x = center_pos.x;
   int center_y = center_pos.z;
 
   for (auto it = world.loaded_chunks.begin();
-       it != world.loaded_chunks.end();) {
+       it != world.loaded_chunks.end(); ++it) {
     auto chunkp = it->second;
 
     if (chunkp == nullptr) {
-      it = world.loaded_chunks.erase(it);
       continue;
     }
 
@@ -1084,10 +1041,15 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
                      chunkp->y >= first_chunk_y && chunkp->y <= last_chunk_y;
 
     if (!in_radius) {
-      unload_chunk(chunkp);
-      it = world.loaded_chunks.erase(it);
-    } else {
-      ++it;
+      bool is_scheduled_to_unload = false;
+      for (auto& [key, chunk] : world.chunks_to_unload) {
+        if (key == it->first) {
+          is_scheduled_to_unload = true;
+          break;
+        }
+      }
+      if (is_scheduled_to_unload) continue; // already scheduled, skip
+      world.chunks_to_unload.push_back(make_pair(it->first, chunkp));
     }
   }
 }
@@ -1135,8 +1097,6 @@ inline bool can_place_at_block(BlockType type) {
 
 void load_chunks_around_player(World &world, WorldPos center_pos,
                                uint32_t radius) {
-  world.chunks = {};
-
   int center_x = center_pos.x;
   int center_y = center_pos.z;
   int first_chunk_x = round_to_nearest_16(center_x) - (CHUNK_WIDTH * radius);
@@ -1145,6 +1105,8 @@ void load_chunks_around_player(World &world, WorldPos center_pos,
   int chunk_cols = radius * 2;
   int chunk_rows = radius * 2;
   int chunk_idx = 0;
+
+  auto it = world.chunks.begin();
 
   for (int chunk_row = 0; chunk_row < chunk_rows; ++chunk_row) {
     int chunk_y = first_chunk_y + chunk_row * CHUNK_LENGTH;
@@ -1165,7 +1127,7 @@ void load_chunks_around_player(World &world, WorldPos center_pos,
         // no need to regenerate
       }
 
-      world.chunks.push_back(loaded_ch);
+      world.chunks[chunk_idx] = loaded_ch;
 
       ++chunk_idx;
     }
@@ -1372,17 +1334,17 @@ Image *calculate_minimap_image(World &world, WorldPos pos, u32 radius) {
   int width = CHUNK_WIDTH * radius;
   int height = CHUNK_LENGTH * radius;
   auto *image = new Image(width, height);
-  for (auto *chunk : world.chunks) {
-    int texture_pos_x = chunk->x - first_chunk_x;
-    int texture_pos_y = chunk->y - first_chunk_y;
-    foreach_col_in_chunk(*chunk, [&](int x, int y) -> void {
-      auto topBlock = get_top_block_of_column(*chunk, x, y);
+  for_all_chunks_in_rd(world, [&](Chunk &chunk) {
+    int texture_pos_x = chunk.x - first_chunk_x;
+    int texture_pos_y = chunk.y - first_chunk_y;
+    foreach_col_in_chunk(chunk, [&](int x, int y) -> void {
+      auto topBlock = get_top_block_of_column(chunk, x, y);
       auto c = block_kind_color(topBlock.type);
       auto image_x = texture_pos_x + x;
       auto image_y = texture_pos_y + y;
       image->set(image_x, image_y, c);
     });
-  }
+  });
   return image;
 }
 
@@ -1517,7 +1479,9 @@ void init_world(World &world, Seed seed) {
        }});
 }
 
-void world_update(World &world, float dt) {
+void world_update(World &world, float dt, WorldPos player_pos,
+                  u32 rendering_distance) {
+  fmt::print("Loading chunks around player at {}\n", player_pos);
   // update time
   int ticks_passed = dt * TICKS_PER_SECOND;
   world.time += ticks_passed;
@@ -1567,4 +1531,7 @@ void world_update(World &world, float dt) {
   } else {
   }
   world.sky_color = mix(colorNight, colorDay, blend_factor);
+
+  load_chunks_around_player(world, player_pos, rendering_distance);
+  unload_distant_chunks(world, player_pos, rendering_distance);
 }
