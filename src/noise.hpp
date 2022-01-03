@@ -6,13 +6,12 @@
 
 using Seed = i64;
 
-class OpenSimplexNoiseWParam {
+struct OpenSimplexNoiseWParam {
   unique_ptr<OpenSimplexNoise::Noise> osn = nullptr;
   Seed seed = 0;
   float frequency = 0.0f;
   float amplitude = 0.0f;
 
- public:
   OpenSimplexNoiseWParam() {}
 
   OpenSimplexNoiseWParam(float _frequency, float _amplitude, float a, float b,
@@ -31,7 +30,7 @@ class OpenSimplexNoiseWParam {
     float amp = this->amplitude;
     float res = 0.0f;
     float amp_sum = 0.0f;
-    for (int i = 0; i < octaves; ++i) {
+    for (u32 i = 0; i < octaves; ++i) {
       int kk = 2 << i;
       amp_sum += amp;
       res += amp * this->osn->eval(kk * this->frequency * x,

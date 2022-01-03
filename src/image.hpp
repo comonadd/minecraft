@@ -17,7 +17,7 @@ struct Image {
   Pixel& operator()(u32 x, u32 y) {
     return *(this->data + x + this->width * y);
   }
-  Pixel& set(u32 x, u32 y, Pixel& val) { this->operator()(x, y) = val; }
+  Pixel& set(u32 x, u32 y, Pixel& val) { return this->operator()(x, y) = val; }
 
   Image(u32 width, u32 height, Pixel* _data)
       : width(width), height(height), data(_data) {}

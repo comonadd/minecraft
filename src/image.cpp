@@ -17,14 +17,12 @@ shared_ptr<Image> image_storage::get_image(string const& name) {
 optional<shared_ptr<Image>> image_storage::load_image(string const& name,
                                                       string const& path) {
   int width, height, nrChannels;
-  auto* data =
-      (Color*)stbi_load(path.c_str(), &width, &height, &nrChannels, 0);
+  auto* data = (Color*)stbi_load(path.c_str(), &width, &height, &nrChannels, 0);
   if (!data) {
     logger::error(
         fmt::format("Failed to load image \"{}\" at \"{}\"", name, path));
     return {};
   }
-  auto* data_end = data + (width * height);
   auto image = make_shared<Image>(Image(width, height, data));
   state.loaded.insert({name, image});
   return image;
