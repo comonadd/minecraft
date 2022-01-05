@@ -130,7 +130,7 @@ struct Biome {
   const char* name;
 };
 
-const int WATER_LEVEL = (int)(CHUNK_HEIGHT * 0.25);
+const int WATER_LEVEL = (int)(CHUNK_HEIGHT * 0.45);
 const int TICKS_PER_SECOND = 100;
 
 // in ticks (12 minutes)
@@ -175,12 +175,20 @@ struct World {
   std::random_device rd;
   std::default_random_engine eng;
   std::uniform_real_distribution<float> _tree_gen{FLOAT_MIN, FLOAT_MAX};
-  OpenSimplexNoiseWParam _tree_noise{0.025f, 64.0f, 2.0f, 0.6f, 345972};
+  OpenSimplexNoiseWParam _tree_noise{1.25f, 1.0f, 2.0f, 0.6f, 1231512};
 
-  inline void tree_gen_seed(i32 x, i32 y) { this->eng.seed(x ^ y); }
+  inline void tree_gen_seed(i32 x, i32 y) {
+    auto hash1 = hash<i32>{}(x);
+    auto hash2 = hash<i32>{}(y);
+    auto res = hash1 ^ hash2;
+    this->eng.seed(res);
+  }
+
+  inline float tree_structure_noise() {
+    return this->_tree_gen(this->eng);
+  }
 
   inline float tree_noise(i32 x, i32 y) {
-    //    return (this->_tree_noise.noise(1, x, y) + 1.0f) / 2.0f;
     return this->_tree_gen(this->eng);
   }
 

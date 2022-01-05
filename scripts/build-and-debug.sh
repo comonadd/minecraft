@@ -1,3 +1,3 @@
 #!/bin/bash
 
-./scripts/build-debug.sh && ./Debug/minecraft
+./scripts/build-debug.sh && ./Debug/minecraft $@

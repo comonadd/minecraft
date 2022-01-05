@@ -630,17 +630,19 @@ void build_oak_tree_at(World &world, Chunk &chunk, int x, int y) {
   auto col = &CHUNK_COL_AT(chunk, x, y);
   auto topBlockHeight = get_col_height(col);
   // start building a tree
-  auto height =
-      map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT, world.tree_noise(x, y));
+  auto height = map(0.0f, 1.0f, MIN_TREE_HEIGHT, MAX_TREE_HEIGHT,
+                    world.tree_structure_noise());
   auto treeTopHeight = topBlockHeight + height;
   auto h = topBlockHeight;
   // crown
   auto bottomRadius = round(map(0.0f, 1.0f, TREE_MIN_RADIUS, TREE_MAX_RADIUS,
-                                world.tree_noise(x, y)));
+                                world.tree_structure_noise()));
   u32 crownHeight = round(map(0.0f, 1.0f, CROWN_MIN_HEIGHT, CROWN_MAX_HEIGHT,
-                              world.tree_noise(x, y)));
+                              world.tree_structure_noise()));
   u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
   u32 crownTop = crownBottom + crownHeight;
+
+//  fmt::print("height: {}\n", height);
 
   for (; crownBottom <= crownTop; ++crownBottom) {
     auto radius = bottomRadius;
@@ -692,16 +694,17 @@ void build_jungle_tree(World &world, Chunk &chunk, int x, int y) {
   auto topBlockHeight = get_col_height(col);
   // start building a tree
   auto height = map(0.0f, 1.0f, MIN_JUNGLE_TREE_HEIGHT, MAX_JUNGLE_TREE_HEIGHT,
-                    world.tree_noise(x, y));
+                    world.tree_structure_noise());
   auto treeTopHeight = topBlockHeight + height;
   auto h = topBlockHeight;
 
   // crown
   auto bottomRadius =
       round(map(0.0f, 1.0f, JUNGLE_TREE_MIN_RADIUS, JUNGLE_TREE_MAX_RADIUS,
-                world.tree_noise(x, y)));
-  u32 crownHeight = round(map(0.0f, 1.0f, JUNGLE_CROWN_MIN_HEIGHT,
-                              JUNGLE_CROWN_MAX_HEIGHT, world.tree_noise(x, y)));
+                world.tree_structure_noise()));
+  u32 crownHeight =
+      round(map(0.0f, 1.0f, JUNGLE_CROWN_MIN_HEIGHT, JUNGLE_CROWN_MAX_HEIGHT,
+                world.tree_structure_noise()));
   u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
   u32 crownTop = crownBottom + crownHeight;
   for (; crownBottom <= crownTop; ++crownBottom) {
@@ -753,14 +756,16 @@ void build_pine_tree_at(World &world, Chunk &chunk, int x, int y) {
   auto topBlockHeight = get_col_height(col);
   // start building a tree
   auto height = map(0.0f, 1.0f, MIN_PINE_TREE_HEIGHT, MAX_PINE_TREE_HEIGHT,
-                    world.tree_noise(x, y));
+                    world.tree_structure_noise());
   auto treeTopHeight = topBlockHeight + height;
   auto h = topBlockHeight;
   // crown
-  auto maxRadius = round(map(0.0f, 1.0f, PINE_TREE_MIN_RADIUS,
-                             PINE_TREE_MAX_RADIUS, world.tree_noise(x, y)));
-  u32 crownHeight = round(map(0.0f, 1.0f, PINE_CROWN_MIN_HEIGHT,
-                              PINE_CROWN_MAX_HEIGHT, world.tree_noise(x, y)));
+  auto maxRadius =
+      round(map(0.0f, 1.0f, PINE_TREE_MIN_RADIUS, PINE_TREE_MAX_RADIUS,
+                world.tree_structure_noise()));
+  u32 crownHeight =
+      round(map(0.0f, 1.0f, PINE_CROWN_MIN_HEIGHT, PINE_CROWN_MAX_HEIGHT,
+                world.tree_structure_noise()));
   u32 crownBottom = treeTopHeight - round((float)crownHeight / 2.0f);
   u32 crownTop = crownBottom + crownHeight;
   auto radiusMax2 = maxRadius * maxRadius;
@@ -827,6 +832,7 @@ void gen_chunk(World &world, Chunk &chunk) {
   }
 
   // generate trees
+  world.tree_gen_seed(chunk.x, chunk.y);
   for (int x = 0; x < CHUNK_WIDTH; ++x) {
     int global_x = chunk.x + x;
     for (int y = 0; y < CHUNK_LENGTH; ++y) {
@@ -838,9 +844,10 @@ void gen_chunk(World &world, Chunk &chunk) {
       if (!can_tree_grow_on(col[topBlockHeight].type)) {
         continue;
       }
-      world.tree_gen_seed(x, y);
+      world.tree_noise(x, y);
       float r = world.tree_noise(x, y);
       auto has_tree_center_here = r < biome.treeFrequency;
+//      fmt::print("freq noise: {}, ({}), tree={}\n", r, biome.treeFrequency, has_tree_center_here);
       if (has_tree_center_here) {
         biome.treeGen(world, chunk, x, y);
       }
@@ -911,7 +918,6 @@ void occlusion(char neighbors[27], char lights[27], float shades[27],
 }
 
 void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
-  fmt::print("Loading chunk at {}\n", vec2(chunk_x, chunk_y));
   chunk.is_being_generated = true;
   auto *mesh = new ChunkMesh();
 
@@ -999,7 +1005,7 @@ void load_chunk_at(World &world, int chunk_x, int chunk_y, Chunk &chunk) {
 }
 
 void unload_chunk(Chunk *chunk) {
-  fmt::print("Unloading chunk at {}, {}\n", chunk->x, chunk->y);
+//  fmt::print("Unloading chunk at {}, {}\n", chunk->x, chunk->y);
 #ifdef VAO_ALLOCATION
   fmt::print("Deallocating VAO={}\n", chunk->vao);
 #endif
@@ -1025,8 +1031,8 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
   int center_x = center_pos.x;
   int center_y = center_pos.z;
 
-  for (auto it = world.loaded_chunks.begin();
-       it != world.loaded_chunks.end(); ++it) {
+  for (auto it = world.loaded_chunks.begin(); it != world.loaded_chunks.end();
+       ++it) {
     auto chunkp = it->second;
 
     if (chunkp == nullptr) {
@@ -1042,13 +1048,13 @@ void unload_distant_chunks(World &world, WorldPos center_pos, u32 radius) {
 
     if (!in_radius) {
       bool is_scheduled_to_unload = false;
-      for (auto& [key, chunk] : world.chunks_to_unload) {
+      for (auto &[key, chunk] : world.chunks_to_unload) {
         if (key == it->first) {
           is_scheduled_to_unload = true;
           break;
         }
       }
-      if (is_scheduled_to_unload) continue; // already scheduled, skip
+      if (is_scheduled_to_unload) continue;  // already scheduled, skip
       world.chunks_to_unload.push_back(make_pair(it->first, chunkp));
     }
   }
@@ -1362,21 +1368,21 @@ void calculate_minimap_tex(Texture &texture, World &world, WorldPos pos,
 
 void init_world(World &world, Seed seed) {
   world.height_noise =
-      OpenSimplexNoiseWParam{0.0025f, 32.0f, 2.0f, 0.6f, seed + 28394723234234};
+      OpenSimplexNoiseWParam{0.000025f, 32.0f, 2.0f, 0.6f, seed ^ 28394723234234};
   world.rainfall_noise =
-      OpenSimplexNoiseWParam{0.0005f, 2.0f, 3.0f, 0.5f, seed + 89273492837497};
+      OpenSimplexNoiseWParam{0.0005f, 2.0f, 3.0f, 0.5f, seed ^ 89273492837497};
   world.temperature_noise =
-      OpenSimplexNoiseWParam{0.00075f, 1.0f, 2.0f, 0.5f, seed + 89213674293468};
+      OpenSimplexNoiseWParam{0.00075f, 1.0f, 2.0f, 0.5f, seed ^ 89213674293468};
 
-  int bseed = 0;
+  int bseed = seed;
 
   // Desert
   world.biomes_by_kind.insert(
       {BiomeKind::Desert,
        Biome{
            .kind = BiomeKind::Desert,
-           .maxHeight = (int)(CHUNK_HEIGHT * 0.68),
-           .noise = OpenSimplexNoiseWParam{0.00002f, 0.5f, 2.0f, 0.5f, bseed},
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.55),
+           .noise = OpenSimplexNoiseWParam{0.00002f, 16.0f, 2.0f, 0.5f, bseed},
            .treeFrequency = 0.0f,
            .treeGen = build_oak_tree_at,
            .name = "Desert",
@@ -1387,9 +1393,9 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Forest,
        Biome{
            .kind = BiomeKind::Forest,
-           .maxHeight = (int)(CHUNK_HEIGHT * 0.88),
-           .noise = OpenSimplexNoiseWParam{0.004f, 1.0f, 2.0f, 0.5f, bseed},
-           .treeFrequency = 0.035f,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.65),
+           .noise = OpenSimplexNoiseWParam{0.004f, 32.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.03f,
            .treeGen = build_oak_tree_at,
            .name = "Forest",
        }});
@@ -1399,11 +1405,23 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Jungle,
        Biome{
            .kind = BiomeKind::Jungle,
-           .maxHeight = (int)(CHUNK_HEIGHT * 0.84),
-           .noise = OpenSimplexNoiseWParam{0.01f, 1.0f, 2.0f, 0.5f, bseed},
-           .treeFrequency = 0.065f,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.66),
+           .noise = OpenSimplexNoiseWParam{0.01f, 32.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.05f,
            .treeGen = build_jungle_tree,
            .name = "Jungle",
+       }});
+
+  // Taiga
+  world.biomes_by_kind.insert(
+      {BiomeKind::Taiga,
+       Biome{
+           .kind = BiomeKind::Taiga,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.56),
+           .noise = OpenSimplexNoiseWParam{0.004f, 32.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.02f,
+           .treeGen = build_pine_tree_at,
+           .name = "Taiga",
        }});
 
   // Grassland
@@ -1411,9 +1429,9 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Grassland,
        Biome{
            .kind = BiomeKind::Grassland,
-           .maxHeight = (int)(CHUNK_HEIGHT * 0.75),
-           .noise = OpenSimplexNoiseWParam{0.00001f, 1.0f, 2.0f, 0.5f, bseed},
-           .treeFrequency = 0.0012f,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.55),
+           .noise = OpenSimplexNoiseWParam{0.00001f, 32.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.0072f,
            .treeGen = build_oak_tree_at,
            .name = "Grassland",
        }});
@@ -1423,23 +1441,11 @@ void init_world(World &world, Seed seed) {
       {BiomeKind::Tundra,
        Biome{
            .kind = BiomeKind::Tundra,
-           .maxHeight = (int)(CHUNK_HEIGHT * 0.8),
-           .noise = OpenSimplexNoiseWParam{0.002f, 1.0f, 2.0f, 0.5f, bseed},
-           .treeFrequency = 0.001f,
+           .maxHeight = (int)(CHUNK_HEIGHT * 0.54),
+           .noise = OpenSimplexNoiseWParam{0.002f, 32.0f, 2.0f, 0.5f, bseed},
+           .treeFrequency = 0.005f,
            .treeGen = build_pine_tree_at,
            .name = "Tundra",
-       }});
-
-  // Taiga
-  world.biomes_by_kind.insert(
-      {BiomeKind::Taiga,
-       Biome{
-           .kind = BiomeKind::Taiga,
-           .maxHeight = (int)(CHUNK_HEIGHT * 0.8),
-           .noise = OpenSimplexNoiseWParam{0.004f, 1.0f, 2.0f, 0.5f, bseed},
-           .treeFrequency = 0.25f,
-           .treeGen = build_pine_tree_at,
-           .name = "Taiga",
        }});
 
   // Oceans
@@ -1461,7 +1467,7 @@ void init_world(World &world, Seed seed) {
            .kind = BiomeKind::Coast,
            .maxHeight = WATER_LEVEL + 3,
            .noise = OpenSimplexNoiseWParam{0.001f, 1.0f, 2.0f, 0.5f, bseed},
-           .treeFrequency = 0.000001f,
+           .treeFrequency = 0.0001f,
            .treeGen = build_oak_tree_at,
            .name = "Coast",
        }});
@@ -1473,7 +1479,7 @@ void init_world(World &world, Seed seed) {
            .kind = BiomeKind::Mountains,
            .maxHeight = CHUNK_HEIGHT,
            .noise = OpenSimplexNoiseWParam{0.001f, 64.0f, 2.0f, 0.5f, bseed},
-           .treeFrequency = 0.002f,
+           .treeFrequency = 0.004f,
            .treeGen = build_oak_tree_at,
            .name = "Mountains",
        }});
@@ -1481,7 +1487,7 @@ void init_world(World &world, Seed seed) {
 
 void world_update(World &world, float dt, WorldPos player_pos,
                   u32 rendering_distance) {
-  fmt::print("Loading chunks around player at {}\n", player_pos);
+//  fmt::print("Loading chunks around player at {}\n", player_pos);
   // update time
   int ticks_passed = dt * TICKS_PER_SECOND;
   world.time += ticks_passed;

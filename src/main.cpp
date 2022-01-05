@@ -96,7 +96,7 @@ struct {
   // sun/moon size
   float celestial_size = 2.5f;
 
-  bool render_chunk_borders = true;
+  bool render_chunk_borders = false;
   GLuint chunk_borders_buffer;
   vector<ChunkBorderVertex> chunk_borders_mesh;
   GLuint chunk_borders_vao;
@@ -577,7 +577,7 @@ void update() {
         glBufferData(GL_ARRAY_BUFFER, s, state.chunk_borders_mesh.data(),
                      GL_STATIC_DRAW);
         glVertexAttribPointer(attr.position, 3, GL_FLOAT, GL_FALSE, stride,
-                              (void *) offsetof(SkyVertexData, pos));
+                              (void *)offsetof(SkyVertexData, pos));
         glEnableVertexAttribArray(attr.position);
         glBindVertexArray(0);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -890,6 +890,7 @@ int main(int argc, char **argv) {
   auto parsed_opts = options.parse(argc, argv);
   auto seed = parsed_opts["seed"].as<u64>();
 
+  fmt::print("Using seed {}\n", seed);
   init_world(state.world, seed);
 
   if (parsed_opts["gen"].as<bool>()) {
